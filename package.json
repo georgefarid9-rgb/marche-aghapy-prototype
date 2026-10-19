@@ -1,0 +1,28 @@
+{
+  "name": "marche-aghapy-prototype",
+  "version": "1.0.0",
+  "description": "BTM 495 Marché Aghapy Store Management System - Prototype",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/georgefarid9-rgb/marche-aghapy-prototype.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/georgefarid9-rgb/marche-aghapy-prototype/issues"
+  },
+  "homepage": "https://github.com/georgefarid9-rgb/marche-aghapy-prototype#readme",
+  "dependencies": {
+    "sequelize": "^6.37.8",
+    "sqlite3": "^6.0.1"
+  },
+  "allowScripts": {
+    "sqlite3@6.0.1": true
+  }
+}
