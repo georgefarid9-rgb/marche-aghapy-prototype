@@ -10,6 +10,11 @@ InventoryRecord.init(
       primaryKey: true,
       allowNull: false,
     },
+    productId: {
+  type: DataTypes.STRING,
+  allowNull: false,
+  unique: true,
+},
 
     quantityOnHand: {
       type: DataTypes.INTEGER,
