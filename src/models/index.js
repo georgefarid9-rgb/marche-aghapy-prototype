@@ -10,6 +10,15 @@ const Employee = require("./Employee");
 const Schedule = require("./Schedule");
 const EmployeeShift = require("./EmployeeShift");
 
+// Feature 2 - Dashboard and Reports
+const DashboardSummary = require("./DashboardSummary");
+const Report = require("./Report");
+const InventoryReport = require("./InventoryReport");
+const SalesReport = require("./SalesReport");
+const ExpiryRestockReport = require("./ExpiryRestockReport");
+const ReportFilter = require("./ReportFilter");
+const ReportExport = require("./ReportExport");
+
 // Supplier 1 ---- 0..* Product
 Supplier.hasMany(Product, {
   foreignKey: "supplierId",
@@ -100,6 +109,51 @@ EmployeeShift.belongsTo(Schedule, {
   as: "schedule",
 });
 
+// ----- Feature 2 - Dashboard and Reports -----
+
+// DashboardSummary 1 <>---- 1..* Report (contains, aggregation)
+DashboardSummary.hasMany(Report, {
+  foreignKey: "summaryId",
+  as: "reports",
+});
+
+Report.belongsTo(DashboardSummary, {
+  foreignKey: "summaryId",
+  as: "dashboardSummary",
+});
+
+// Report 1 ---- 0..* ReportFilter (narrowed by)
+Report.hasMany(ReportFilter, {
+  foreignKey: "reportId",
+  as: "filters",
+});
+
+ReportFilter.belongsTo(Report, {
+  foreignKey: "reportId",
+  as: "report",
+});
+
+// Report 1 ---- 0..* ReportExport (exported as)
+Report.hasMany(ReportExport, {
+  foreignKey: "reportId",
+  as: "reportExports",
+});
+
+ReportExport.belongsTo(Report, {
+  foreignKey: "reportId",
+  as: "report",
+});
+
+// Report <|---- InventoryReport, SalesReport, ExpiryRestockReport (generalization)
+Report.hasOne(InventoryReport, { foreignKey: "reportId", as: "inventoryDetails" });
+InventoryReport.belongsTo(Report, { foreignKey: "reportId", as: "report" });
+
+Report.hasOne(SalesReport, { foreignKey: "reportId", as: "salesDetails" });
+SalesReport.belongsTo(Report, { foreignKey: "reportId", as: "report" });
+
+Report.hasOne(ExpiryRestockReport, { foreignKey: "reportId", as: "expiryRestockDetails" });
+ExpiryRestockReport.belongsTo(Report, { foreignKey: "reportId", as: "report" });
+
 module.exports = {
   Supplier,
   Product,
@@ -110,4 +164,11 @@ module.exports = {
   Employee,
   Schedule,
   EmployeeShift,
+  DashboardSummary,
+  Report,
+  InventoryReport,
+  SalesReport,
+  ExpiryRestockReport,
+  ReportFilter,
+  ReportExport,
 };
