@@ -33,6 +33,7 @@ async function seedDatabase() {
     await InventoryRecord.create({
       inventoryId: "INV-001",
       quantityOnHand: 20,
+      reorderLevel: 15,
       expiryDate: "2027-03-30",
       lastUpdated: new Date(),
       productId: "PROD-001",

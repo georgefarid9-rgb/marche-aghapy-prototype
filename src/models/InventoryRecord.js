@@ -21,6 +21,16 @@ InventoryRecord.init(
       allowNull: false,
       defaultValue: 0,
     },
+    
+reorderLevel: {
+  type: DataTypes.INTEGER,
+  allowNull: false,
+  defaultValue: 0,
+  validate: {
+    min: 0,
+  },
+},
+
 
     expiryDate: {
       type: DataTypes.DATEONLY,
