@@ -98,3 +98,48 @@ Current inventory development branch:
 ```text
 feature/inventory
 ```
+
+## Feature 5 – Employee Management / Scheduling
+
+Branch: `feature/employee-scheduling`
+
+### Domain Classes
+
+#### StoreOwner
+- ownerId, ownerName, phoneNumber, email
+- reviewComplaint(complaint), resolveCase(complaint), reviewRestockAlert(), editShift(shift, startTime, endTime), publishSchedule(schedule)
+
+#### Store
+- storeId, storeName, address
+
+#### Employee
+- employeeId, employeeName, phoneNumber, email, role
+- viewSchedule(), searchAccount(id), assistCustomer(), createComplaintCase(), addSoldProduct(item), removeSoldProduct(item)
+
+#### Schedule
+- scheduleId, startDate, endDate
+- addShift(shift), displayShifts(), save()
+
+#### EmployeeShift
+- shiftId, shiftDate, startTime, endTime, shiftStatus
+- validate(), updateShift(startTime, endTime)
+
+### Class Relationships
+
+- One StoreOwner owns one or many Stores.
+- One Store employs one or many Employees.
+- One Store has zero or many Schedules.
+- One Employee works zero or many EmployeeShifts.
+- One Schedule contains zero or many EmployeeShifts (aggregation).
+
+### Verify Feature 5
+
+```bash
+npm run db:setup
+npm run db:seed
+npm run scheduling:check
+```
+
+Methods that depend on other features' classes (Customer, ComplaintCase, SaleItem) are placeholders until those teams add their classes.
+
+The script adds a shift, shows an invalid shift being rejected, edits a shift as the store owner, publishes the schedule, and shows one employee's own schedule.
