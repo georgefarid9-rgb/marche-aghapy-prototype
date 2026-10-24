@@ -1,7 +1,33 @@
 const { Model, DataTypes } = require("sequelize");
 const sequelize = require("../database");
 
-class InventoryRecord extends Model {}
+
+class InventoryRecord extends Model {
+  evaluateInventoryStatus() {
+    if (this.quantityOnHand === 0) {
+      return "OUT_OF_STOCK";
+    }
+
+    if (this.quantityOnHand <= this.reorderLevel) {
+      return "LOW_STOCK";
+    }
+
+    return "IN_STOCK";
+  }
+  
+async updateQuantity(newQuantity) {
+  if (!Number.isSafeInteger(newQuantity) || newQuantity < 0) {
+    throw new Error("Quantity must be a non-negative integer.");
+  }
+
+  await this.update({
+    quantityOnHand: newQuantity,
+    lastUpdated: new Date(),
+  });
+}
+
+}
+
 
 InventoryRecord.init(
   {
