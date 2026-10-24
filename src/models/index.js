@@ -30,16 +30,22 @@ Product.belongsTo(Supplier, {
   as: "supplier",
 });
 
-// Product 1 ---- 1 InventoryRecord
+
+ // Product 1 ---- 1 InventoryRecord
 Product.hasOne(InventoryRecord, {
   foreignKey: "productId",
   as: "inventoryRecord",
+  onDelete: "RESTRICT",
+  onUpdate: "CASCADE",
 });
 
 InventoryRecord.belongsTo(Product, {
   foreignKey: "productId",
   as: "product",
+  onDelete: "RESTRICT",
+  onUpdate: "CASCADE",
 });
+
 
 // InventoryRecord 1 ---- 0..* RestockAlert
 InventoryRecord.hasMany(RestockAlert, {

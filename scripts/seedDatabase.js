@@ -22,16 +22,18 @@ async function seedDatabase() {
       leadTimeDays: 7,
     });
 
-    await Product.create({
-      productId: "PROD-001",
-      productName: "Foul Medames",
-      description: "Egyptian canned fava beans",
-      supplierId: "SUP-001",
-    });
+   await Product.create({
+  productId: "PROD-001",
+  productName: "Foul Medames",
+  description: "Egyptian canned fava beans",
+  category: "Canned Foods",
+  supplierId: "SUP-001",
+});
 
     await InventoryRecord.create({
       inventoryId: "INV-001",
       quantityOnHand: 20,
+      reorderLevel: 15,
       expiryDate: "2027-03-30",
       lastUpdated: new Date(),
       productId: "PROD-001",
