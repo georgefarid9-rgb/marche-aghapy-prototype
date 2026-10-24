@@ -8,7 +8,8 @@
     "db:setup": "node scripts/setupDatabase.js",
     "db:seed": "node scripts/seedDatabase.js",
     "prototype:check": "node scripts/verifyPrototype.js",
-    "scheduling:check": "node scripts/verifyScheduling.js"
+    "scheduling:check": "node scripts/verifyScheduling.js",
+    "profiles:check": "node scripts/verifyProfiles.js"
   },
   "repository": {
     "type": "git",

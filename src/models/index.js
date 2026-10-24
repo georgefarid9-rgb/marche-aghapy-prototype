@@ -19,6 +19,11 @@ const ExpiryRestockReport = require("./ExpiryRestockReport");
 const ReportFilter = require("./ReportFilter");
 const ReportExport = require("./ReportExport");
 
+// Feature 3 - Supplier and Customer Profile Management
+const BusinessPartner = require("./BusinessPartner");
+const Customer = require("./Customer");
+const PerformanceRecord = require("./PerformanceRecord");
+
 // Supplier 1 ---- 0..* Product
 Supplier.hasMany(Product, {
   foreignKey: "supplierId",
@@ -160,6 +165,37 @@ SalesReport.belongsTo(Report, { foreignKey: "reportId", as: "report" });
 Report.hasOne(ExpiryRestockReport, { foreignKey: "reportId", as: "expiryRestockDetails" });
 ExpiryRestockReport.belongsTo(Report, { foreignKey: "reportId", as: "report" });
 
+// ----- Feature 3 - Supplier and Customer Profile Management -----
+
+// BusinessPartner <|---- Supplier, Customer (generalization)
+BusinessPartner.hasOne(Supplier, { foreignKey: "partnerId", as: "supplierProfile" });
+Supplier.belongsTo(BusinessPartner, { foreignKey: "partnerId", as: "partner" });
+
+BusinessPartner.hasOne(Customer, { foreignKey: "partnerId", as: "customerProfile" });
+Customer.belongsTo(BusinessPartner, { foreignKey: "partnerId", as: "partner" });
+
+// Supplier 1 <>---- 0..* PerformanceRecord (accumulates, aggregation)
+Supplier.hasMany(PerformanceRecord, {
+  foreignKey: "supplierId",
+  as: "performanceRecords",
+});
+
+PerformanceRecord.belongsTo(Supplier, {
+  foreignKey: "supplierId",
+  as: "supplier",
+});
+
+// Employee 1 ---- 0..* PerformanceRecord (records)
+Employee.hasMany(PerformanceRecord, {
+  foreignKey: "employeeId",
+  as: "performanceRecords",
+});
+
+PerformanceRecord.belongsTo(Employee, {
+  foreignKey: "employeeId",
+  as: "recordedBy",
+});
+
 module.exports = {
   Supplier,
   Product,
@@ -177,4 +213,7 @@ module.exports = {
   ExpiryRestockReport,
   ReportFilter,
   ReportExport,
+  BusinessPartner,
+  Customer,
+  PerformanceRecord,
 };

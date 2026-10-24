@@ -12,6 +12,7 @@ The repository currently includes models for:
 
 - **Feature 1 — Product and Inventory Management:** product records, suppliers, inventory quantities, expiry dates, reorder levels, and restock-alert records.
 - **Feature 2 — Dashboard and Reports:** dashboard summaries, reports, report filters, exports, and report-specific data models.
+- **Feature 3 — Supplier and Customer Profile Management:** shared business-partner profiles, supplier and customer profiles, and supplier delivery performance records.
 - **Feature 5 — Employee Management / Scheduling:** store owners, stores, employees, schedules, and shifts.
 
 These are **prototype models**, not a complete production-ready store application. Each feature has a different level of implementation and verification.
@@ -76,6 +77,8 @@ The subsystem records products, manages inventory quantities and expiry dates, i
 - `supplierId` — primary key
 - `supplierName` — supplier name
 - `leadTimeDays` — supplier lead time in days (optional)
+
+Feature 3 adds `contactInformation`, `paymentTerms`, and `partnerId` to Supplier; see the Feature 3 section.
 
 #### Product (`src/models/Product.js`)
 
@@ -184,6 +187,119 @@ The repository contains the following Feature 2 model classes in `src/models/`:
 
 Their Sequelize associations are registered in `src/models/index.js`. These classes provide the structural foundation for dashboard summaries and report data. This README does not claim that report generation, exports, or automated Feature 2 testing is complete.
 
+## Feature 3 — Supplier and Customer Profile Management
+
+### Purpose
+
+The subsystem keeps one shared profile for every business partner of the store (suppliers and customers), stores the details specific to each kind of partner, and records how well each supplier delivers so the owner can compare suppliers.
+
+### Domain classes and attributes
+
+#### BusinessPartner {abstract} (`src/models/BusinessPartner.js`)
+
+- `partnerId` — primary key
+- `partnerName` — required, non-empty name
+- `partnerStatus` — `Active` (default) or `Inactive`
+- `partnerType` — `Supplier` or `Customer`; records which subclass the profile belongs to
+
+#### Supplier (`src/models/Supplier.js`) — fields added by Feature 3
+
+- `contactInformation` — optional supplier contact details
+- `paymentTerms` — optional payment terms (for example, `Net 30`)
+- `partnerId` — unique foreign key to BusinessPartner; nullable so supplier rows created before Feature 3 still work
+
+The existing Feature 1 fields (`supplierId`, `supplierName`, `leadTimeDays`) are unchanged.
+
+#### Customer (`src/models/Customer.js`)
+
+- `customerId` — primary key
+- `phoneNumber` — optional
+- `email` — optional, validated as an email address
+- `createdDate` — date the profile was created; defaults to today
+- `partnerId` — required, unique foreign key to BusinessPartner
+
+#### PerformanceRecord (`src/models/PerformanceRecord.js`)
+
+- `recordId` — primary key
+- `deliveryDate` — date the delivery actually arrived
+- `expectedDeliveryDate` — date the delivery was due (added so the delivery delay can be calculated)
+- `quantityOrdered` — at least 1
+- `quantityReceived` — 0 or more
+- `conditionRating` — `Good` (default), `Acceptable`, or `Poor`
+- `deliveryDelay` and `fillRate` — derived attributes, computed on read and not stored
+- `supplierId` and `employeeId` — foreign keys established through the Sequelize associations
+
+### Class relationships
+
+- BusinessPartner is the generalization of Supplier and Customer. It is implemented as a parent table: each Supplier or Customer row points to one BusinessPartner row through a unique `partnerId`, following the same pattern as Report and its report subclasses.
+- One Supplier accumulates zero or many PerformanceRecords (aggregation).
+- One Employee records zero or many PerformanceRecords.
+
+### Implemented class methods
+
+**`BusinessPartner.updateProfile(changes)`**
+
+- Updates the editable profile field (`partnerName`) and saves. Fields that are not editable, such as `partnerId`, are ignored.
+
+**`BusinessPartner.changeStatus(newStatus)`**
+
+- Sets the status to `Active` or `Inactive` and saves. Any other value is rejected with an error.
+
+**`Supplier.evaluatePerformance()`**
+
+- Returns the supplier's average fill rate (0–100) across all its PerformanceRecords, or `null` when it has none.
+
+**`Customer.retrieveInfo()`**
+
+- Returns the customer's full profile: the shared BusinessPartner fields (name, status) plus the Customer fields.
+
+**`PerformanceRecord.calculateDeliveryDelay()`**
+
+- Returns the days between `expectedDeliveryDate` and `deliveryDate`: positive when late, `0` when on time, negative when early.
+
+**`PerformanceRecord.calculateFillRate()`**
+
+- Returns `quantityReceived` as a percentage of `quantityOrdered`, rounded to one decimal.
+
+**`PerformanceRecord.flagDiscrepancy()`**
+
+- Returns `true` when the quantity received differs from the quantity ordered, or when the condition is `Poor`.
+
+### Sample profile data
+
+| Item | Sample value |
+| --- | --- |
+| Supplier profile | `BP-001` → `SUP-001` Sample Supplier, Net 30 |
+| Customer profile | `BP-002` → `CUST-001` Sample Customer |
+| Delivery `PERF-001` | 40 of 40 received, on time, Good |
+| Delivery `PERF-002` | 45 of 50 received, 3 days late, Acceptable |
+| Recorded by | `EMP-002` Stock Clerk One |
+
+### Verify Feature 3
+
+After `npm run db:setup` and `npm run db:seed` on a disposable database:
+
+```bash
+npm run profiles:check
+```
+
+The script reads `SUP-001` with its BusinessPartner profile and PerformanceRecords, runs every Feature 3 method, and confirms that an invalid status is rejected. It returns the sample customer to its original state, so it can be run more than once. Expected results include:
+
+```text
+PERF-001  ordered 40, received 40  fillRate 100%  delay 0 day(s)  discrepancy false
+PERF-002  ordered 50, received 45  fillRate 90%  delay 3 day(s)  discrepancy true
+evaluatePerformance(): 95%
+Profile verification successful.
+```
+
+### Feature 3 limitations
+
+- `Customer.listPurchaseHistory()` returns an empty list and the derived `/purchaseHistory` is not implemented, because the shared Sale class is not in the prototype yet.
+- `Customer.contactEmployee()` is a placeholder until Feature 6 (Customer Support) is implemented.
+- `supplierName` (Supplier) and `partnerName` (BusinessPartner) both store the supplier's name; `updateProfile()` changes only `partnerName`.
+- The Employee *accesses* Customer association from the class diagram is not implemented.
+- `expectedDeliveryDate` is not in the current class diagram and should be added to it.
+
 ## Feature 5 — Employee Management / Scheduling
 
 The repository also includes Feature 5 models and its scheduling verification script.
@@ -269,7 +385,7 @@ git switch -c docs/inventory-prototype-readme
 | --- | --- |
 | Version control with Git/GitHub | Set up and used for feature branches and Pull Requests |
 | Database service | SQLite configured with Sequelize models and setup scripts |
-| Classes and attributes | Feature 1 implemented; additional Feature 2 and Feature 5 models present |
+| Classes and attributes | Feature 1 implemented; additional Feature 2, Feature 3 and Feature 5 models present |
 | Optional class methods | Three Feature 1 methods implemented and tested at the method-logic level |
 | Full combined-system testing | Pending |
 
