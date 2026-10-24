@@ -13,6 +13,7 @@ The repository currently includes models for:
 - **Feature 1 — Product and Inventory Management:** product records, suppliers, inventory quantities, expiry dates, reorder levels, and restock-alert records.
 - **Feature 2 — Dashboard and Reports:** dashboard summaries, reports, report filters, exports, and report-specific data models.
 - **Feature 5 — Employee Management / Scheduling:** store owners, stores, employees, schedules, and shifts.
+- **Feature 6 — Customer Support:** complaint cases, support requests, return requests and refunds, and the shared sale classes they rely on.
 
 These are **prototype models**, not a complete production-ready store application. Each feature has a different level of implementation and verification.
 
@@ -235,6 +236,69 @@ The scheduling verification script exercises adding, validating, editing, publis
 
 Some Feature 5 operations that depend on classes from other features are still documented as placeholders until those components are available.
 
+## Feature 6 — Customer Support
+
+### Purpose
+
+Supports the "Provide customer support" use case: a customer contacts an employee, the employee looks up the customer's records, helps them, opens a complaint case if needed, escalates it to the store owner when it cannot be resolved, processes a return and refund, and logs the interaction.
+
+### Domain classes and attributes
+
+#### ComplaintCase (`src/models/ComplaintCase.js`)
+
+- Attributes: `caseId`, `category`, `description`, `status` (`Open`, `Pending Owner Review`, `Resolved`), `dateCreated`, `customerId`
+- Operations: `createCase()`, `setStatus(status)`, `escalateToOwner(ownerId)`
+
+#### SupportRequest (`src/models/SupportRequest.js`)
+
+- Attributes: `requestId`, `requestDate`, `subject`, `description`, `requestStatus` (`Open`, `Logged`, `Closed`), `customerId`
+- Operations: `logInteraction()`, `addNotes(text)`
+
+#### ReturnRequest (`src/models/ReturnRequest.js`)
+
+- Attributes: `returnId`, `reason`, `amount`, `status` (`Pending`, `Refunded`, `Rejected`), `customerId`
+- Operations: `checkEligibility()`, `processRefund()`
+- A return is eligible when it is linked to a sale, the amount is above zero, the sale is within **30 days**, and the amount does not exceed what is still refundable on the sale (sale total minus refunds already paid). `processRefund()` marks an eligible return `Refunded` and an ineligible one `Rejected`.
+
+#### Sale and SaleItem (`src/models/Sale.js`, `src/models/SaleItem.js`) — shared sales classes
+
+- `Sale` attributes: `saleId`, `saleDate`, `totalAmount`, `paymentMethod`, `customerId` (optional, so walk-in sales are possible)
+- `Sale` operations: `addItem(item)`, `removeItem(item)`, `recalculateTotal()`
+- `SaleItem` attributes: `quantity`, `unitPrice` (plus a `saleItemId` key so single lines can be removed)
+
+#### Updated existing classes
+
+- `Employee`: `searchAccount(id)`, `assistCustomer(customerId)`, `createComplaintCase(customerId, details)`, `addSoldProduct(item)` and `removeSoldProduct(item)` are now implemented instead of placeholders.
+- `StoreOwner`: `reviewComplaint()` and `resolveCase()` were already present and are used by the escalation flow.
+
+### Class relationships
+
+- One Customer can have zero or many ComplaintCases, SupportRequests, ReturnRequests and Sales.
+- One Employee can create ComplaintCases, log SupportRequests, process ReturnRequests and ring up Sales.
+- One StoreOwner can review zero or many escalated ComplaintCases.
+- One Sale consists of one or more SaleItems, and can have zero or many ReturnRequests.
+- Each SaleItem refers to one Product.
+
+### Dependency on Feature 3 (Customer)
+
+The `Customer` model is built in Feature 3 (branch `feature/supplier-customer-profiles`). `src/models/index.js` registers the Customer associations only when `src/models/Customer.js` exists, so Feature 6 works before and after that branch is merged. Until then the `customerId` columns hold plain values, and `Employee.searchAccount()` returns `null`. The seed script uses `CUST-001`, the sample customer that the Feature 3 seed creates.
+
+### Verify Feature 6
+
+After `npm run db:setup` and `npm run db:seed`:
+
+```bash
+npm run support:check
+```
+
+The script follows the use case: it retrieves a customer's records, handles a missing record (flow 3a), creates and escalates a complaint to the owner (flow 5a), and processes eligible and ineligible refunds. It also exercises the sale methods and logs a support interaction. A successful run prints `Customer support verification successful.` **It modifies sample support data.**
+
+### Feature 6 limitations
+
+- Updating inventory and accounting after a refund (use case step 7) is not implemented, because the Ledger and Transaction classes are not part of the prototype yet.
+- `Customer.listPurchaseHistory()` (Feature 3) is still a placeholder; `Employee.assistCustomer()` reads the customer's sales directly.
+- The 30-day return window is a prototype rule chosen by this feature, not a requirement from the analysis documents.
+
 ## Database Storage
 
 The local SQLite file is located at:
@@ -271,6 +335,7 @@ git switch -c docs/inventory-prototype-readme
 | Database service | SQLite configured with Sequelize models and setup scripts |
 | Classes and attributes | Feature 1 implemented; additional Feature 2 and Feature 5 models present |
 | Optional class methods | Three Feature 1 methods implemented and tested at the method-logic level |
+| Feature 6 customer support classes and flow | Implemented; verified with `npm run support:check` |
 | Full combined-system testing | Pending |
 
 The project is an educational prototype. Additional business functionality, test coverage, and cross-feature integration may be added in subsequent milestones.
