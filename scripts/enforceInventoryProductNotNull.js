@@ -27,6 +27,9 @@ async function migrate() {
   try {
     const columns = await all("PRAGMA table_info(inventory_records)");
     const productId = columns.find(c => c.name === "productId");
+    const hasReorderLevel = columns.some(
+  c => c.name === "reorderLevel"
+);
 
     if (!productId) throw new Error("productId column not found.");
 
@@ -65,6 +68,7 @@ async function migrate() {
       CREATE TABLE new_inventory_records (
         inventoryId VARCHAR(255) NOT NULL PRIMARY KEY,
         quantityOnHand INTEGER NOT NULL DEFAULT 0,
+        reorderLevel INTEGER NOT NULL DEFAULT 0,
         expiryDate DATE,
         lastUpdated DATETIME NOT NULL,
         productId VARCHAR(255) NOT NULL
@@ -74,11 +78,24 @@ async function migrate() {
     `);
 
     await run(`
-      INSERT INTO new_inventory_records
-      (inventoryId, quantityOnHand, expiryDate, lastUpdated, productId)
-      SELECT inventoryId, quantityOnHand, expiryDate, lastUpdated, productId
-      FROM inventory_records
-    `);
+  INSERT INTO new_inventory_records
+  (
+    inventoryId,
+    quantityOnHand,
+    expiryDate,
+    lastUpdated,
+    productId,
+    reorderLevel
+  )
+  SELECT
+    inventoryId,
+    quantityOnHand,
+    expiryDate,
+    lastUpdated,
+    productId,
+    ${hasReorderLevel ? "reorderLevel" : "0"}
+  FROM inventory_records
+`);
 
     await run("DROP TABLE inventory_records");
     await run("ALTER TABLE new_inventory_records RENAME TO inventory_records");
