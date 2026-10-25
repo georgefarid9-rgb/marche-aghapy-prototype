@@ -10,6 +10,7 @@
     "prototype:check": "node scripts/verifyPrototype.js",
     "scheduling:check": "node scripts/verifyScheduling.js",
     "profiles:check": "node scripts/verifyProfiles.js",
+    "reports:check": "node scripts/verifyReports.js",
     "profiles:migrate": "node scripts/migrateFeature3Profiles.js"
   },
   "repository": {
