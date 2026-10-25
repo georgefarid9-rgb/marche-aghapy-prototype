@@ -198,17 +198,17 @@ The subsystem keeps one shared profile for every business partner of the store (
 #### BusinessPartner {abstract} (`src/models/BusinessPartner.js`)
 
 - `partnerId` — primary key
-- `partnerName` — required, non-empty name
+- `partnerName` — required, non-empty name; the **authoritative** name of the partner
 - `partnerStatus` — `Active` (default) or `Inactive`
-- `partnerType` — `Supplier` or `Customer`; records which subclass the profile belongs to
+- `partnerType` — `Supplier` or `Customer`; fixed after creation
 
 #### Supplier (`src/models/Supplier.js`) — fields added by Feature 3
 
 - `contactInformation` — optional supplier contact details
 - `paymentTerms` — optional payment terms (for example, `Net 30`)
-- `partnerId` — unique foreign key to BusinessPartner; nullable so supplier rows created before Feature 3 still work
+- `partnerId` — unique foreign key to BusinessPartner; nullable so supplier rows created before Feature 3 still work (the migration below links them)
 
-The existing Feature 1 fields (`supplierId`, `supplierName`, `leadTimeDays`) are unchanged.
+The Feature 1 fields (`supplierId`, `supplierName`, `leadTimeDays`) are kept. For a supplier linked to a BusinessPartner, `supplierName` is a synchronized copy of `partnerName` (see Business rules).
 
 #### Customer (`src/models/Customer.js`)
 
@@ -222,24 +222,36 @@ The existing Feature 1 fields (`supplierId`, `supplierName`, `leadTimeDays`) are
 
 - `recordId` — primary key
 - `deliveryDate` — date the delivery actually arrived
-- `expectedDeliveryDate` — date the delivery was due (added so the delivery delay can be calculated)
+- `expectedDeliveryDate` — date the delivery was due; needed to calculate the delivery delay
 - `quantityOrdered` — at least 1
 - `quantityReceived` — 0 or more
 - `conditionRating` — `Good` (default), `Acceptable`, or `Poor`
 - `deliveryDelay` and `fillRate` — derived attributes, computed on read and not stored
-- `supplierId` and `employeeId` — foreign keys established through the Sequelize associations
+- `supplierId` — **required** foreign key to Supplier
+- `employeeId` — **required** foreign key to Employee (who recorded the delivery)
 
 ### Class relationships
 
 - BusinessPartner is the generalization of Supplier and Customer. It is implemented as a parent table: each Supplier or Customer row points to one BusinessPartner row through a unique `partnerId`, following the same pattern as Report and its report subclasses.
-- One Supplier accumulates zero or many PerformanceRecords (aggregation).
-- One Employee records zero or many PerformanceRecords.
+- One Supplier accumulates zero or many PerformanceRecords (aggregation). Every record must have a Supplier; a Supplier with records cannot be deleted (`ON DELETE RESTRICT`).
+- One Employee records zero or many PerformanceRecords. Every record must name an Employee (`ON DELETE RESTRICT`).
+- One Customer makes zero or many Sales. This association is registered by Feature 6, which provides the shared Sale model.
+
+### Business rules enforced in the models
+
+| Rule | Where it is enforced |
+| --- | --- |
+| `partnerName` is the one authoritative name. Saving a supplier partner copies its name to `Supplier.supplierName`; a new supplier takes its name from its partner. | `BusinessPartner` `afterSave` hook, `Supplier` `beforeValidate` hook |
+| `supplierName` cannot be set to a different name directly; use `BusinessPartner.updateProfile()`. | `Supplier` `beforeValidate` hook |
+| A Supplier must link to a partner of type `Supplier`, a Customer to a partner of type `Customer`. | `Supplier` and `Customer` `beforeValidate` hooks |
+| `partnerType` cannot change after the partner is created. | `BusinessPartner` `beforeUpdate` hook |
+| A PerformanceRecord needs an existing Supplier and Employee. | `allowNull: false` + foreign key constraints |
 
 ### Implemented class methods
 
 **`BusinessPartner.updateProfile(changes)`**
 
-- Updates the editable profile field (`partnerName`) and saves. Fields that are not editable, such as `partnerId`, are ignored.
+- Updates the editable profile field (`partnerName`) and saves, in a transaction that also updates the linked Supplier's `supplierName`. Fields that are not editable, such as `partnerId` and `partnerType`, are ignored.
 
 **`BusinessPartner.changeStatus(newStatus)`**
 
@@ -253,17 +265,22 @@ The existing Feature 1 fields (`supplierId`, `supplierName`, `leadTimeDays`) are
 
 - Returns the customer's full profile: the shared BusinessPartner fields (name, status) plus the Customer fields.
 
+**`Customer.listPurchaseHistory()`**
+
+- Returns the customer's Sales, newest first (the derived `/purchaseHistory`). It uses the shared Sale model from Feature 6; while that model is not in the prototype, it returns an empty list.
+
 **`PerformanceRecord.calculateDeliveryDelay()`**
 
 - Returns the days between `expectedDeliveryDate` and `deliveryDate`: positive when late, `0` when on time, negative when early.
 
 **`PerformanceRecord.calculateFillRate()`**
 
-- Returns `quantityReceived` as a percentage of `quantityOrdered`, rounded to one decimal.
+- Returns the share of the order that was filled, from 0 to 100, rounded to one decimal.
+- **Over-delivery** (more received than ordered) counts as 100%: the order was fully met, and the extra units are not credited. `flagDiscrepancy()` reports the over-delivery.
 
 **`PerformanceRecord.flagDiscrepancy()`**
 
-- Returns `true` when the quantity received differs from the quantity ordered, or when the condition is `Poor`.
+- Returns `true` when the quantity received differs from the quantity ordered (short or over), or when the condition is `Poor`.
 
 ### Sample profile data
 
@@ -283,22 +300,34 @@ After `npm run db:setup` and `npm run db:seed` on a disposable database:
 npm run profiles:check
 ```
 
-The script reads `SUP-001` with its BusinessPartner profile and PerformanceRecords, runs every Feature 3 method, and confirms that an invalid status is rejected. It returns the sample customer to its original state, so it can be run more than once. Expected results include:
+The script checks every result with an assertion: the seeded supplier and its deliveries, every Feature 3 method, over-delivery, the required Supplier and Employee references, partnerType consistency, name synchronization, and invalid status values. Any failed check prints `Profile verification FAILED` and ends with exit code `1`. It restores the sample data afterwards, so it can be run more than once. A successful run ends with:
 
 ```text
-PERF-001  ordered 40, received 40  fillRate 100%  delay 0 day(s)  discrepancy false
-PERF-002  ordered 50, received 45  fillRate 90%  delay 3 day(s)  discrepancy true
-evaluatePerformance(): 95%
-Profile verification successful.
+Profile verification successful (17 checks passed).
 ```
+
+### Existing database — add Feature 3 without losing data
+
+For a database created **before** Feature 3, do not rerun `npm run db:setup`. Instead run:
+
+```bash
+npm run profiles:migrate
+```
+
+The migration keeps all existing data and is safe to run more than once. It:
+
+1. Backs up the database to `database/marche-aghapy-before-feature3-<time>.sqlite` (ignored by Git).
+2. Creates the `business_partners`, `customers`, and `performance_records` tables if they are missing.
+3. Adds `contactInformation`, `paymentTerms`, and `partnerId` (with a unique index) to `suppliers` if they are missing.
+4. Gives every existing supplier without a profile a BusinessPartner (`BP-<supplierId>`, named after its `supplierName`).
+
+It does not insert the Feature 3 sample customer or deliveries, so `npm run profiles:check` is meant for a freshly seeded database.
 
 ### Feature 3 limitations
 
-- `Customer.listPurchaseHistory()` returns an empty list and the derived `/purchaseHistory` is not implemented, because the shared Sale class is not in the prototype yet.
-- `Customer.contactEmployee()` is a placeholder until Feature 6 (Customer Support) is implemented.
-- `supplierName` (Supplier) and `partnerName` (BusinessPartner) both store the supplier's name; `updateProfile()` changes only `partnerName`.
+- `Customer.contactEmployee()` is a placeholder; the class diagram has no Customer–Employee contact record.
 - The Employee *accesses* Customer association from the class diagram is not implemented.
-- `expectedDeliveryDate` is not in the current class diagram and should be added to it.
+- `Supplier.partnerId` stays nullable for Feature 1 suppliers created without a profile; run the migration to link them.
 
 ## Feature 5 — Employee Management / Scheduling
 

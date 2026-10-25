@@ -20,15 +20,24 @@ class Customer extends Model {
     };
   }
 
-  // ----- Placeholders until the shared Sale class exists -----
-
-  // /purchaseHistory is derived from the customer's Sales.
-  // Returns an empty list until the Sale class is added to the prototype.
+  // /purchaseHistory: the customer's Sales, newest first.
+  // Uses the shared Sale model (Customer 1 ---- 0..* Sale, "makes"), which is
+  // registered by Feature 6. Until that model is in the prototype, the
+  // association does not exist and this returns an empty list.
   async listPurchaseHistory() {
-    return [];
+    if (typeof this.getSales !== "function") {
+      return [];
+    }
+    return this.getSales({
+      order: [
+        ["saleDate", "DESC"],
+        ["saleId", "DESC"],
+      ],
+    });
   }
 
   // Customer reaches out to store staff (Feature 6 - Customer Support).
+  // Placeholder: the class diagram has no Customer-Employee contact record.
   contactEmployee() {
     return null;
   }
@@ -72,6 +81,31 @@ Customer.init(
     modelName: "Customer",
     tableName: "customers",
     timestamps: false,
+    hooks: {
+      // The linked partner must exist and be a Customer.
+      async beforeValidate(customer, options) {
+        if (!customer.partnerId) {
+          return; // the notNull check on partnerId reports this
+        }
+
+        const partner = await sequelize.models.BusinessPartner.findByPk(
+          customer.partnerId,
+          { transaction: options.transaction }
+        );
+
+        if (!partner) {
+          throw new Error(
+            `Customer ${customer.customerId}: BusinessPartner ${customer.partnerId} does not exist.`
+          );
+        }
+        if (partner.partnerType !== "Customer") {
+          throw new Error(
+            `Customer ${customer.customerId}: BusinessPartner ${partner.partnerId} has partnerType ` +
+              `"${partner.partnerType}", expected "Customer".`
+          );
+        }
+      },
+    },
   }
 );
 

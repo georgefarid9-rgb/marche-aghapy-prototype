@@ -175,25 +175,36 @@ BusinessPartner.hasOne(Customer, { foreignKey: "partnerId", as: "customerProfile
 Customer.belongsTo(BusinessPartner, { foreignKey: "partnerId", as: "partner" });
 
 // Supplier 1 <>---- 0..* PerformanceRecord (accumulates, aggregation)
+// Required: a record cannot exist without its Supplier, and a Supplier with
+// delivery history cannot be deleted.
 Supplier.hasMany(PerformanceRecord, {
-  foreignKey: "supplierId",
+  foreignKey: { name: "supplierId", allowNull: false },
   as: "performanceRecords",
+  onDelete: "RESTRICT",
+  onUpdate: "CASCADE",
 });
 
 PerformanceRecord.belongsTo(Supplier, {
-  foreignKey: "supplierId",
+  foreignKey: { name: "supplierId", allowNull: false },
   as: "supplier",
+  onDelete: "RESTRICT",
+  onUpdate: "CASCADE",
 });
 
 // Employee 1 ---- 0..* PerformanceRecord (records)
+// Required: every record names the Employee who recorded it.
 Employee.hasMany(PerformanceRecord, {
-  foreignKey: "employeeId",
+  foreignKey: { name: "employeeId", allowNull: false },
   as: "performanceRecords",
+  onDelete: "RESTRICT",
+  onUpdate: "CASCADE",
 });
 
 PerformanceRecord.belongsTo(Employee, {
-  foreignKey: "employeeId",
+  foreignKey: { name: "employeeId", allowNull: false },
   as: "recordedBy",
+  onDelete: "RESTRICT",
+  onUpdate: "CASCADE",
 });
 
 module.exports = {
