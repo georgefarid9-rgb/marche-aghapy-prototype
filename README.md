@@ -175,17 +175,72 @@ It is a prototype retrieval check, not a comprehensive automated test suite.
 
 ## Feature 2 — Dashboard and Reports
 
-The repository contains the following Feature 2 model classes in `src/models/`:
+### Purpose
 
-- `DashboardSummary`
-- `Report`
-- `InventoryReport`
-- `SalesReport`
-- `ExpiryRestockReport`
-- `ReportFilter`
-- `ReportExport`
+The subsystem gives the store owner one dashboard summary of sales, low stock, near-expiry and restocking, and lets the owner generate inventory, sales and expiry/restock reports, narrow them with filters, and export them.
 
-Their Sequelize associations are registered in `src/models/index.js`. These classes provide the structural foundation for dashboard summaries and report data. This README does not claim that report generation, exports, or automated Feature 2 testing is complete.
+### Domain classes and attributes
+
+- **DashboardSummary** — `summaryId`, `summaryDate`, `lastRefreshed`, `totalSalesToday`, `lowStockCount`, `nearExpiryCount`, `pendingRestockCount`, `dataStatus` (defaults to `Available`)
+- **Report** {abstract} — `reportId`, `reportType` (`inventory`, `sales` or `expiry-restock`), `generatedDate` (set automatically), `periodStart`, `periodEnd`, `reportStatus` (defaults to `Generated`), `summaryId`
+- **InventoryReport** — `reportId`, `totalProducts`, `totalQuantityOnHand`, `lowStockCount`
+- **SalesReport** — `reportId`, `totalSalesAmount`, `numberOfSales`, `averageSaleAmount` (derived: calculated on read, not stored)
+- **ExpiryRestockReport** — `reportId`, `expiryWindowDays` (defaults to 7), `nearExpiryCount`, `restockCount`
+- **ReportFilter** — `filterId`, `reportId`, `startDate`, `endDate`, `productId`, `category`
+- **ReportExport** — `exportId`, `reportId`, `exportDate` (set automatically), `exportFormat`, `fileName`
+
+### Class relationships
+
+- One DashboardSummary contains one or many Reports (aggregation, `reports.summaryId`).
+- Report is the generalization of InventoryReport, SalesReport and ExpiryRestockReport. It is implemented as a parent table: each subclass row shares its `reportId` with one Report row, and `reportType` records which kind of report it is.
+- One Report is narrowed by zero or many ReportFilters.
+- One Report is exported as zero or many ReportExports.
+
+### Verify Feature 2
+
+The check creates its own test records (IDs starting with `VR-`) and deletes them afterwards, so it does not need seed data and can be run more than once. Run it against a fresh test database so it matches the current models:
+
+```bash
+SQLITE_PATH=database/reports-test.sqlite npm run db:setup
+SQLITE_PATH=database/reports-test.sqlite npm run reports:check
+```
+
+The script checks every result with an assertion:
+
+1. The foreign keys exist in the SQLite schema itself, and foreign key enforcement is on.
+2. A DashboardSummary, all three report types, a ReportFilter and a ReportExport can be created.
+3. They can be read back, with the expected default values.
+4. Every association works in both directions (summary ↔ reports, report ↔ filters, report ↔ exports, report ↔ subclass details).
+5. The derived `averageSaleAmount` is correct, including when there are no sales.
+6. Invalid data is rejected: filters, exports and report details that point to a missing report, a report that points to a missing summary, and missing required fields.
+
+Any failed check prints `Report verification FAILED` and ends with exit code `1`. A successful run ends with:
+
+```text
+Report verification successful (24 checks passed).
+```
+
+### Feature 2 limitations — methods not yet implemented
+
+The class attributes and associations are complete. The following operations from the Feature 2 class diagram are **optional for this prototype and are not implemented yet**:
+
+| Class | Operations not yet implemented |
+| --- | --- |
+| Report | `generateReport()`, `retrieveReportData()`, `applyFilter(filter)`, `hasData()`, `exportReport(format)` |
+| InventoryReport | `retrieveReportData()`, `identifyLowStock()` |
+| SalesReport | `retrieveReportData()`, `summarizeSales(start, end)` |
+| ExpiryRestockReport | `retrieveReportData()`, `identifyNearExpiry()`, `identifyRestockNeeds()` |
+| DashboardSummary | `refreshSummary()`, `flagUnavailableData()`, `getAvailableReportTypes()` |
+| ReportFilter | `validateCriteria()` |
+| ReportExport | `createExportFile()` |
+
+As a result:
+
+- Report figures (totals and counts) are stored values; they are not yet calculated from the inventory and sales records.
+- The dashboard's derived counts are stored values and are not refreshed automatically.
+- Exports are recorded (format, file name, date), but no actual PDF, Excel or CSV file is produced.
+- SalesReport cannot read real sales until the shared Sale model (Feature 6) is added.
+- The only implemented logic is the derived attribute `SalesReport.averageSaleAmount`.
 
 ## Feature 3 — Supplier and Customer Profile Management
 
