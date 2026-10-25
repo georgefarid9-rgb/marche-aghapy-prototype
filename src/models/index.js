@@ -1,6 +1,3 @@
-const fs = require("fs");
-const path = require("path");
-
 const Supplier = require("./Supplier");
 const Product = require("./Product");
 const InventoryRecord = require("./InventoryRecord");
@@ -22,18 +19,17 @@ const ExpiryRestockReport = require("./ExpiryRestockReport");
 const ReportFilter = require("./ReportFilter");
 const ReportExport = require("./ReportExport");
 
+// Feature 3 - Supplier and Customer Profile Management
+const BusinessPartner = require("./BusinessPartner");
+const Customer = require("./Customer");
+const PerformanceRecord = require("./PerformanceRecord");
+
 // Feature 6 - Customer Support (and the shared Sale classes it relies on)
 const ComplaintCase = require("./ComplaintCase");
 const SupportRequest = require("./SupportRequest");
 const ReturnRequest = require("./ReturnRequest");
 const Sale = require("./Sale");
 const SaleItem = require("./SaleItem");
-
-// Customer is built in Feature 3 (branch feature/supplier-customer-profiles).
-// Load it only if it is present, so Feature 6 works before and after that merge.
-const Customer = fs.existsSync(path.join(__dirname, "Customer.js"))
-  ? require("./Customer")
-  : null;
 
 // Supplier 1 ---- 0..* Product
 Supplier.hasMany(Product, {
@@ -176,6 +172,49 @@ SalesReport.belongsTo(Report, { foreignKey: "reportId", as: "report" });
 Report.hasOne(ExpiryRestockReport, { foreignKey: "reportId", as: "expiryRestockDetails" });
 ExpiryRestockReport.belongsTo(Report, { foreignKey: "reportId", as: "report" });
 
+// ----- Feature 3 - Supplier and Customer Profile Management -----
+
+// BusinessPartner <|---- Supplier, Customer (generalization)
+BusinessPartner.hasOne(Supplier, { foreignKey: "partnerId", as: "supplierProfile" });
+Supplier.belongsTo(BusinessPartner, { foreignKey: "partnerId", as: "partner" });
+
+BusinessPartner.hasOne(Customer, { foreignKey: "partnerId", as: "customerProfile" });
+Customer.belongsTo(BusinessPartner, { foreignKey: "partnerId", as: "partner" });
+
+// Supplier 1 <>---- 0..* PerformanceRecord (accumulates, aggregation)
+// Required: a record cannot exist without its Supplier, and a Supplier with
+// delivery history cannot be deleted.
+Supplier.hasMany(PerformanceRecord, {
+  foreignKey: { name: "supplierId", allowNull: false },
+  as: "performanceRecords",
+  onDelete: "RESTRICT",
+  onUpdate: "CASCADE",
+});
+
+PerformanceRecord.belongsTo(Supplier, {
+  foreignKey: { name: "supplierId", allowNull: false },
+  as: "supplier",
+  onDelete: "RESTRICT",
+  onUpdate: "CASCADE",
+});
+
+// Employee 1 ---- 0..* PerformanceRecord (records)
+// Required: every record names the Employee who recorded it.
+Employee.hasMany(PerformanceRecord, {
+  foreignKey: { name: "employeeId", allowNull: false },
+  as: "performanceRecords",
+  onDelete: "RESTRICT",
+  onUpdate: "CASCADE",
+});
+
+PerformanceRecord.belongsTo(Employee, {
+  foreignKey: { name: "employeeId", allowNull: false },
+  as: "recordedBy",
+  onDelete: "RESTRICT",
+  onUpdate: "CASCADE",
+});
+
+
 // ----- Feature 6 - Customer Support -----
 
 // Sale 1 <>---- 1..* SaleItem (consists of, composition)
@@ -267,25 +306,69 @@ ComplaintCase.belongsTo(StoreOwner, {
   as: "owner",
 });
 
-// Customer associations (only when the Feature 3 Customer model exists).
-// The customerId columns exist on the Feature 6 tables either way.
-if (Customer) {
-  // Customer 1 <>---- 0..* ComplaintCase (has case, aggregation)
-  Customer.hasMany(ComplaintCase, { foreignKey: "customerId", as: "complaintCases" });
-  ComplaintCase.belongsTo(Customer, { foreignKey: "customerId", as: "customer" });
+// Customer (Feature 3) associations. A case, request or return always belongs to a
+// real Customer; a Sale may have none (walk-in). Customers with records cannot be deleted.
 
-  // Customer 1 ---- 0..* SupportRequest (submits)
-  Customer.hasMany(SupportRequest, { foreignKey: "customerId", as: "supportRequests" });
-  SupportRequest.belongsTo(Customer, { foreignKey: "customerId", as: "customer" });
+// Customer 1 <>---- 0..* ComplaintCase (has case, aggregation)
+Customer.hasMany(ComplaintCase, {
+  foreignKey: { name: "customerId", allowNull: false },
+  as: "complaintCases",
+  onDelete: "RESTRICT",
+  onUpdate: "CASCADE",
+});
 
-  // Customer 1 <>---- 0..* ReturnRequest (has return, aggregation)
-  Customer.hasMany(ReturnRequest, { foreignKey: "customerId", as: "returnRequests" });
-  ReturnRequest.belongsTo(Customer, { foreignKey: "customerId", as: "customer" });
+ComplaintCase.belongsTo(Customer, {
+  foreignKey: { name: "customerId", allowNull: false },
+  as: "customer",
+  onDelete: "RESTRICT",
+  onUpdate: "CASCADE",
+});
 
-  // Customer 1 ---- 0..* Sale (makes)
-  Customer.hasMany(Sale, { foreignKey: "customerId", as: "sales" });
-  Sale.belongsTo(Customer, { foreignKey: "customerId", as: "customer" });
-}
+// Customer 1 ---- 0..* SupportRequest (submits)
+Customer.hasMany(SupportRequest, {
+  foreignKey: { name: "customerId", allowNull: false },
+  as: "supportRequests",
+  onDelete: "RESTRICT",
+  onUpdate: "CASCADE",
+});
+
+SupportRequest.belongsTo(Customer, {
+  foreignKey: { name: "customerId", allowNull: false },
+  as: "customer",
+  onDelete: "RESTRICT",
+  onUpdate: "CASCADE",
+});
+
+// Customer 1 <>---- 0..* ReturnRequest (has return, aggregation)
+Customer.hasMany(ReturnRequest, {
+  foreignKey: { name: "customerId", allowNull: false },
+  as: "returnRequests",
+  onDelete: "RESTRICT",
+  onUpdate: "CASCADE",
+});
+
+ReturnRequest.belongsTo(Customer, {
+  foreignKey: { name: "customerId", allowNull: false },
+  as: "customer",
+  onDelete: "RESTRICT",
+  onUpdate: "CASCADE",
+});
+
+// Customer 1 ---- 0..* Sale (makes). Customer.listPurchaseHistory() (Feature 3)
+// reads this association through getSales().
+Customer.hasMany(Sale, {
+  foreignKey: "customerId",
+  as: "sales",
+  onDelete: "RESTRICT",
+  onUpdate: "CASCADE",
+});
+
+Sale.belongsTo(Customer, {
+  foreignKey: "customerId",
+  as: "customer",
+  onDelete: "RESTRICT",
+  onUpdate: "CASCADE",
+});
 
 module.exports = {
   Supplier,
@@ -304,11 +387,12 @@ module.exports = {
   ExpiryRestockReport,
   ReportFilter,
   ReportExport,
+  BusinessPartner,
+  Customer,
+  PerformanceRecord,
   ComplaintCase,
   SupportRequest,
   ReturnRequest,
   Sale,
   SaleItem,
-  // Present only once the Feature 3 Customer model has been merged.
-  ...(Customer ? { Customer } : {}),
 };

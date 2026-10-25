@@ -1,5 +1,6 @@
 const { Model, DataTypes } = require("sequelize");
 const sequelize = require("../database");
+const { today } = require("../utils/dates");
 
 // Shared sales classes (used by Feature 6 - Customer Support for returns and refunds).
 // A Sale is made up of one or more SaleItems (composition).
@@ -64,6 +65,14 @@ Sale.init(
       type: DataTypes.DATEONLY,
       allowNull: false,
       defaultValue: DataTypes.NOW,
+      validate: {
+        // A sale cannot be dated in the future (it could never be returned correctly).
+        notInFuture(value) {
+          if (value > today()) {
+            throw new Error(`Sale date ${value} cannot be in the future.`);
+          }
+        },
+      },
     },
 
     totalAmount: {
@@ -78,13 +87,9 @@ Sale.init(
       defaultValue: "Cash",
     },
 
-    // The customer on the sale. Optional so a walk-in sale without an account can
-    // still be rung up. Declared here so the column exists even before the
-    // Feature 3 Customer model is merged (see models/index.js).
-    customerId: {
-      type: DataTypes.STRING,
-      allowNull: true,
-    },
+    // customerId (the customer on the sale, optional so a walk-in sale without an
+    // account can still be rung up) and employeeId are added by the associations in
+    // models/index.js.
   },
   {
     sequelize,

@@ -32,6 +32,10 @@ class ComplaintCase extends Model {
   // The case is marked "Pending Owner Review". If no owner id is given, the owner
   // of the store where the creating employee works is used.
   async escalateToOwner(ownerId) {
+    if (this.status === "Resolved") {
+      throw new Error(`Complaint case ${this.caseId} is already Resolved and cannot be escalated.`);
+    }
+
     let targetOwnerId = ownerId;
 
     if (!targetOwnerId && this.employeeId) {
@@ -79,12 +83,8 @@ ComplaintCase.init(
       defaultValue: DataTypes.NOW,
     },
 
-    // The customer who raised the case. Declared here so the column exists even
-    // before the Feature 3 Customer model is merged (see models/index.js).
-    customerId: {
-      type: DataTypes.STRING,
-      allowNull: false,
-    },
+    // customerId, employeeId (and ownerId for cases) are added by the associations in
+    // models/index.js.
   },
   {
     sequelize,

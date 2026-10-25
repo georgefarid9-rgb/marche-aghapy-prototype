@@ -16,13 +16,9 @@ class Employee extends Model {
   // The methods below work with Customer (Feature 3) and the Feature 6 / sales classes.
   // They load the models when called, which avoids a circular import with models/index.js.
 
-  // Find a customer account by id. Returns null when the account does not exist,
-  // or when the Customer model (Feature 3) has not been merged yet.
+  // Find a customer account by id. Returns null when the account does not exist.
   async searchAccount(id) {
     const { Customer } = require("./index");
-    if (!Customer) {
-      return null;
-    }
     return Customer.findByPk(id);
   }
 
@@ -55,6 +51,10 @@ class Employee extends Model {
   async createComplaintCase(customerId, details) {
     const { ComplaintCase } = require("./index");
     const generateId = require("../utils/generateId");
+
+    if (!(await this.searchAccount(customerId))) {
+      throw new Error(`Customer ${customerId} was not found, so no complaint case was created.`);
+    }
 
     const complaint = ComplaintCase.build({
       caseId: details.caseId || generateId("CASE"),

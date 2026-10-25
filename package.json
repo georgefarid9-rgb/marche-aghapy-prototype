@@ -9,7 +9,11 @@
     "db:seed": "node scripts/seedDatabase.js",
     "prototype:check": "node scripts/verifyPrototype.js",
     "scheduling:check": "node scripts/verifyScheduling.js",
-    "support:check": "node scripts/verifyCustomerSupport.js"
+    "profiles:check": "node scripts/verifyProfiles.js",
+    "reports:check": "node scripts/verifyReports.js",
+    "profiles:migrate": "node scripts/migrateFeature3Profiles.js",
+    "support:check": "node scripts/verifyCustomerSupport.js",
+    "support:migrate": "node scripts/migrateFeature6Support.js"
   },
   "repository": {
     "type": "git",

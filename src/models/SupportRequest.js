@@ -58,12 +58,7 @@ SupportRequest.init(
       validate: { isIn: [REQUEST_STATUSES] },
     },
 
-    // The customer who submitted the request. Declared here so the column exists
-    // even before the Feature 3 Customer model is merged (see models/index.js).
-    customerId: {
-      type: DataTypes.STRING,
-      allowNull: false,
-    },
+    // customerId and employeeId are added by the associations in models/index.js.
   },
   {
     sequelize,

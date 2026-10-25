@@ -10,6 +10,9 @@ const {
   Employee,
   Schedule,
   EmployeeShift,
+  BusinessPartner,
+  Customer,
+  PerformanceRecord,
   Sale,
   SaleItem,
   ComplaintCase,
@@ -21,10 +24,22 @@ async function seedDatabase() {
   try {
     await sequelize.authenticate();
 
+    // Feature 3: the supplier's shared BusinessPartner profile must exist
+    // before the Supplier row that points to it.
+    await BusinessPartner.create({
+      partnerId: "BP-001",
+      partnerName: "Sample Supplier",
+      partnerStatus: "Active",
+      partnerType: "Supplier",
+    });
+
     await Supplier.create({
       supplierId: "SUP-001",
       supplierName: "Sample Supplier",
       leadTimeDays: 7,
+      contactInformation: "orders@samplesupplier.ca",
+      paymentTerms: "Net 30",
+      partnerId: "BP-001",
     });
 
    await Product.create({
@@ -116,12 +131,57 @@ async function seedDatabase() {
       { validate: true }
     );
 
-    // ----- Feature 6 - Customer Support -----
-    // The sample customer CUST-001 is created by the Feature 3 seed data
-    // (branch feature/supplier-customer-profiles). Until that is merged, the
-    // customerId below is only a plain value and no Customer row exists.
+    // ----- Feature 3 - Supplier and Customer Profile Management -----
 
-    const today = new Date().toISOString().slice(0, 10);
+    await BusinessPartner.create({
+      partnerId: "BP-002",
+      partnerName: "Sample Customer",
+      partnerStatus: "Active",
+      partnerType: "Customer",
+    });
+
+    await Customer.create({
+      customerId: "CUST-001",
+      phoneNumber: "514-555-0200",
+      email: "customer1@example.com",
+      createdDate: "2026-10-01",
+      partnerId: "BP-002",
+    });
+
+    // Two deliveries from SUP-001, recorded by the stock clerk (EMP-002):
+    // one complete and on time, one late and short.
+    await PerformanceRecord.bulkCreate(
+      [
+        {
+          recordId: "PERF-001",
+          expectedDeliveryDate: "2026-10-05",
+          deliveryDate: "2026-10-05",
+          quantityOrdered: 40,
+          quantityReceived: 40,
+          conditionRating: "Good",
+          supplierId: "SUP-001",
+          employeeId: "EMP-002",
+        },
+        {
+          recordId: "PERF-002",
+          expectedDeliveryDate: "2026-10-12",
+          deliveryDate: "2026-10-15",
+          quantityOrdered: 50,
+          quantityReceived: 45,
+          conditionRating: "Acceptable",
+          supplierId: "SUP-001",
+          employeeId: "EMP-002",
+        },
+      ],
+      { validate: true }
+    );
+
+    // ----- Feature 6 - Customer Support -----
+    // The sample customer CUST-001 is created by the Feature 3 seed data above,
+    // so it must stay before these rows.
+
+    const { today: todayString } = require("../src/utils/dates");
+    const today = todayString();
 
     await Sale.create({
       saleId: "SALE-001",
