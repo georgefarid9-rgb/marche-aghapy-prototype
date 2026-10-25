@@ -19,6 +19,12 @@ const ExpiryRestockReport = require("./ExpiryRestockReport");
 const ReportFilter = require("./ReportFilter");
 const ReportExport = require("./ReportExport");
 
+// Feature 4 - Accounting
+const Transaction = require("./Transaction");
+const Ledger = require("./Ledger");
+const BudgetThreshold = require("./BudgetThreshold");
+const FinancialReport = require("./FinancialReport");
+
 // Supplier 1 ---- 0..* Product
 Supplier.hasMany(Product, {
   foreignKey: "supplierId",
@@ -63,6 +69,31 @@ StoreOwner.hasMany(Store, {
 Store.belongsTo(StoreOwner, {
   foreignKey: "ownerId",
   as: "owner",
+});
+
+
+ // ----- Feature 4 - Accounting -----
+
+// StoreOwner manages ledgers
+StoreOwner.hasMany(Ledger, {
+  foreignKey: "ownerId",
+  as: "ledgers",
+});
+
+Ledger.belongsTo(StoreOwner, {
+  foreignKey: "ownerId",
+  as: "owner",
+});
+
+// Ledger contains transactions
+Ledger.hasMany(Transaction, {
+  foreignKey: "ledgerId",
+  as: "transactions",
+});
+
+Transaction.belongsTo(Ledger, {
+  foreignKey: "ledgerId",
+  as: "ledger",
 });
 
 // Store 1 ---- 1..* Employee (employs)
@@ -151,6 +182,17 @@ InventoryReport.belongsTo(Report, { foreignKey: "reportId", as: "report" });
 Report.hasOne(SalesReport, { foreignKey: "reportId", as: "salesDetails" });
 SalesReport.belongsTo(Report, { foreignKey: "reportId", as: "report" });
 
+
+Report.hasOne(FinancialReport, {
+  foreignKey: "reportId",
+  as: "financialDetails",
+});
+
+FinancialReport.belongsTo(Report, {
+  foreignKey: "reportId",
+  as: "report",
+});
+
 Report.hasOne(ExpiryRestockReport, { foreignKey: "reportId", as: "expiryRestockDetails" });
 ExpiryRestockReport.belongsTo(Report, { foreignKey: "reportId", as: "report" });
 
@@ -159,6 +201,9 @@ module.exports = {
   Product,
   InventoryRecord,
   RestockAlert,
+  Transaction,
+  Ledger,
+  BudgetThreshold,
   StoreOwner,
   Store,
   Employee,
@@ -166,6 +211,7 @@ module.exports = {
   EmployeeShift,
   DashboardSummary,
   Report,
+  FinancialReport,
   InventoryReport,
   SalesReport,
   ExpiryRestockReport,
