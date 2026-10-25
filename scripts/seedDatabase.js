@@ -10,16 +10,31 @@ const {
   Employee,
   Schedule,
   EmployeeShift,
+  BusinessPartner,
+  Customer,
+  PerformanceRecord,
 } = require("../src/models");
 
 async function seedDatabase() {
   try {
     await sequelize.authenticate();
 
+    // Feature 3: the supplier's shared BusinessPartner profile must exist
+    // before the Supplier row that points to it.
+    await BusinessPartner.create({
+      partnerId: "BP-001",
+      partnerName: "Sample Supplier",
+      partnerStatus: "Active",
+      partnerType: "Supplier",
+    });
+
     await Supplier.create({
       supplierId: "SUP-001",
       supplierName: "Sample Supplier",
       leadTimeDays: 7,
+      contactInformation: "orders@samplesupplier.ca",
+      paymentTerms: "Net 30",
+      partnerId: "BP-001",
     });
 
    await Product.create({
@@ -106,6 +121,51 @@ async function seedDatabase() {
           shiftStatus: "Draft",
           employeeId: "EMP-002",
           scheduleId: "SCH-001",
+        },
+      ],
+      { validate: true }
+    );
+
+    // ----- Feature 3 - Supplier and Customer Profile Management -----
+
+    await BusinessPartner.create({
+      partnerId: "BP-002",
+      partnerName: "Sample Customer",
+      partnerStatus: "Active",
+      partnerType: "Customer",
+    });
+
+    await Customer.create({
+      customerId: "CUST-001",
+      phoneNumber: "514-555-0200",
+      email: "customer1@example.com",
+      createdDate: "2026-10-01",
+      partnerId: "BP-002",
+    });
+
+    // Two deliveries from SUP-001, recorded by the stock clerk (EMP-002):
+    // one complete and on time, one late and short.
+    await PerformanceRecord.bulkCreate(
+      [
+        {
+          recordId: "PERF-001",
+          expectedDeliveryDate: "2026-10-05",
+          deliveryDate: "2026-10-05",
+          quantityOrdered: 40,
+          quantityReceived: 40,
+          conditionRating: "Good",
+          supplierId: "SUP-001",
+          employeeId: "EMP-002",
+        },
+        {
+          recordId: "PERF-002",
+          expectedDeliveryDate: "2026-10-12",
+          deliveryDate: "2026-10-15",
+          quantityOrdered: 50,
+          quantityReceived: 45,
+          conditionRating: "Acceptable",
+          supplierId: "SUP-001",
+          employeeId: "EMP-002",
         },
       ],
       { validate: true }

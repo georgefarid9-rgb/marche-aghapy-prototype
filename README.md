@@ -12,6 +12,7 @@ The repository currently includes models for:
 
 - **Feature 1 — Product and Inventory Management:** product records, suppliers, inventory quantities, expiry dates, reorder levels, and restock-alert records.
 - **Feature 2 — Dashboard and Reports:** dashboard summaries, reports, report filters, exports, and report-specific data models.
+- **Feature 3 — Supplier and Customer Profile Management:** shared business-partner profiles, supplier and customer profiles, and supplier delivery performance records.
 - **Feature 5 — Employee Management / Scheduling:** store owners, stores, employees, schedules, and shifts.
 
 These are **prototype models**, not a complete production-ready store application. Each feature has a different level of implementation and verification.
@@ -76,6 +77,8 @@ The subsystem records products, manages inventory quantities and expiry dates, i
 - `supplierId` — primary key
 - `supplierName` — supplier name
 - `leadTimeDays` — supplier lead time in days (optional)
+
+Feature 3 adds `contactInformation`, `paymentTerms`, and `partnerId` to Supplier; see the Feature 3 section.
 
 #### Product (`src/models/Product.js`)
 
@@ -184,6 +187,148 @@ The repository contains the following Feature 2 model classes in `src/models/`:
 
 Their Sequelize associations are registered in `src/models/index.js`. These classes provide the structural foundation for dashboard summaries and report data. This README does not claim that report generation, exports, or automated Feature 2 testing is complete.
 
+## Feature 3 — Supplier and Customer Profile Management
+
+### Purpose
+
+The subsystem keeps one shared profile for every business partner of the store (suppliers and customers), stores the details specific to each kind of partner, and records how well each supplier delivers so the owner can compare suppliers.
+
+### Domain classes and attributes
+
+#### BusinessPartner {abstract} (`src/models/BusinessPartner.js`)
+
+- `partnerId` — primary key
+- `partnerName` — required, non-empty name; the **authoritative** name of the partner
+- `partnerStatus` — `Active` (default) or `Inactive`
+- `partnerType` — `Supplier` or `Customer`; fixed after creation
+
+#### Supplier (`src/models/Supplier.js`) — fields added by Feature 3
+
+- `contactInformation` — optional supplier contact details
+- `paymentTerms` — optional payment terms (for example, `Net 30`)
+- `partnerId` — unique foreign key to BusinessPartner; nullable so supplier rows created before Feature 3 still work (the migration below links them)
+
+The Feature 1 fields (`supplierId`, `supplierName`, `leadTimeDays`) are kept. For a supplier linked to a BusinessPartner, `supplierName` is a synchronized copy of `partnerName` (see Business rules).
+
+#### Customer (`src/models/Customer.js`)
+
+- `customerId` — primary key
+- `phoneNumber` — optional
+- `email` — optional, validated as an email address
+- `createdDate` — date the profile was created; defaults to today
+- `partnerId` — required, unique foreign key to BusinessPartner
+
+#### PerformanceRecord (`src/models/PerformanceRecord.js`)
+
+- `recordId` — primary key
+- `deliveryDate` — date the delivery actually arrived
+- `expectedDeliveryDate` — date the delivery was due; needed to calculate the delivery delay
+- `quantityOrdered` — at least 1
+- `quantityReceived` — 0 or more
+- `conditionRating` — `Good` (default), `Acceptable`, or `Poor`
+- `deliveryDelay` and `fillRate` — derived attributes, computed on read and not stored
+- `supplierId` — **required** foreign key to Supplier
+- `employeeId` — **required** foreign key to Employee (who recorded the delivery)
+
+### Class relationships
+
+- BusinessPartner is the generalization of Supplier and Customer. It is implemented as a parent table: each Supplier or Customer row points to one BusinessPartner row through a unique `partnerId`, following the same pattern as Report and its report subclasses.
+- One Supplier accumulates zero or many PerformanceRecords (aggregation). Every record must have a Supplier; a Supplier with records cannot be deleted (`ON DELETE RESTRICT`).
+- One Employee records zero or many PerformanceRecords. Every record must name an Employee (`ON DELETE RESTRICT`).
+- One Customer makes zero or many Sales. This association is registered by Feature 6, which provides the shared Sale model.
+
+### Business rules enforced in the models
+
+| Rule | Where it is enforced |
+| --- | --- |
+| `partnerName` is the one authoritative name. Saving a supplier partner copies its name to `Supplier.supplierName`; a new supplier takes its name from its partner. | `BusinessPartner` `afterSave` hook, `Supplier` `beforeValidate` hook |
+| `supplierName` cannot be set to a different name directly; use `BusinessPartner.updateProfile()`. | `Supplier` `beforeValidate` hook |
+| A Supplier must link to a partner of type `Supplier`, a Customer to a partner of type `Customer`. | `Supplier` and `Customer` `beforeValidate` hooks |
+| `partnerType` cannot change after the partner is created. | `BusinessPartner` `beforeUpdate` hook |
+| A PerformanceRecord needs an existing Supplier and Employee. | `allowNull: false` + foreign key constraints |
+
+### Implemented class methods
+
+**`BusinessPartner.updateProfile(changes)`**
+
+- Updates the editable profile field (`partnerName`) and saves, in a transaction that also updates the linked Supplier's `supplierName`. Fields that are not editable, such as `partnerId` and `partnerType`, are ignored.
+
+**`BusinessPartner.changeStatus(newStatus)`**
+
+- Sets the status to `Active` or `Inactive` and saves. Any other value is rejected with an error.
+
+**`Supplier.evaluatePerformance()`**
+
+- Returns the supplier's average fill rate (0–100) across all its PerformanceRecords, or `null` when it has none.
+
+**`Customer.retrieveInfo()`**
+
+- Returns the customer's full profile: the shared BusinessPartner fields (name, status) plus the Customer fields.
+
+**`Customer.listPurchaseHistory()`**
+
+- Returns the customer's Sales, newest first (the derived `/purchaseHistory`). It uses the shared Sale model from Feature 6; while that model is not in the prototype, it returns an empty list.
+
+**`PerformanceRecord.calculateDeliveryDelay()`**
+
+- Returns the days between `expectedDeliveryDate` and `deliveryDate`: positive when late, `0` when on time, negative when early.
+
+**`PerformanceRecord.calculateFillRate()`**
+
+- Returns the share of the order that was filled, from 0 to 100, rounded to one decimal.
+- **Over-delivery** (more received than ordered) counts as 100%: the order was fully met, and the extra units are not credited. `flagDiscrepancy()` reports the over-delivery.
+
+**`PerformanceRecord.flagDiscrepancy()`**
+
+- Returns `true` when the quantity received differs from the quantity ordered (short or over), or when the condition is `Poor`.
+
+### Sample profile data
+
+| Item | Sample value |
+| --- | --- |
+| Supplier profile | `BP-001` → `SUP-001` Sample Supplier, Net 30 |
+| Customer profile | `BP-002` → `CUST-001` Sample Customer |
+| Delivery `PERF-001` | 40 of 40 received, on time, Good |
+| Delivery `PERF-002` | 45 of 50 received, 3 days late, Acceptable |
+| Recorded by | `EMP-002` Stock Clerk One |
+
+### Verify Feature 3
+
+After `npm run db:setup` and `npm run db:seed` on a disposable database:
+
+```bash
+npm run profiles:check
+```
+
+The script checks every result with an assertion: the seeded supplier and its deliveries, every Feature 3 method, over-delivery, the required Supplier and Employee references, partnerType consistency, name synchronization, and invalid status values. Any failed check prints `Profile verification FAILED` and ends with exit code `1`. It restores the sample data afterwards, so it can be run more than once. A successful run ends with:
+
+```text
+Profile verification successful (17 checks passed).
+```
+
+### Existing database — add Feature 3 without losing data
+
+For a database created **before** Feature 3, do not rerun `npm run db:setup`. Instead run:
+
+```bash
+npm run profiles:migrate
+```
+
+The migration keeps all existing data and is safe to run more than once. It:
+
+1. Backs up the database to `database/marche-aghapy-before-feature3-<time>.sqlite` (ignored by Git).
+2. Creates the `business_partners`, `customers`, and `performance_records` tables if they are missing.
+3. Adds `contactInformation`, `paymentTerms`, and `partnerId` (with a unique index) to `suppliers` if they are missing.
+4. Gives every existing supplier without a profile a BusinessPartner (`BP-<supplierId>`, named after its `supplierName`).
+
+It does not insert the Feature 3 sample customer or deliveries, so `npm run profiles:check` is meant for a freshly seeded database.
+
+### Feature 3 limitations
+
+- `Customer.contactEmployee()` is a placeholder; the class diagram has no Customer–Employee contact record.
+- The Employee *accesses* Customer association from the class diagram is not implemented.
+- `Supplier.partnerId` stays nullable for Feature 1 suppliers created without a profile; run the migration to link them.
+
 ## Feature 5 — Employee Management / Scheduling
 
 The repository also includes Feature 5 models and its scheduling verification script.
@@ -269,7 +414,7 @@ git switch -c docs/inventory-prototype-readme
 | --- | --- |
 | Version control with Git/GitHub | Set up and used for feature branches and Pull Requests |
 | Database service | SQLite configured with Sequelize models and setup scripts |
-| Classes and attributes | Feature 1 implemented; additional Feature 2 and Feature 5 models present |
+| Classes and attributes | Feature 1 implemented; additional Feature 2, Feature 3 and Feature 5 models present |
 | Optional class methods | Three Feature 1 methods implemented and tested at the method-logic level |
 | Full combined-system testing | Pending |
 

@@ -19,6 +19,11 @@ const ExpiryRestockReport = require("./ExpiryRestockReport");
 const ReportFilter = require("./ReportFilter");
 const ReportExport = require("./ReportExport");
 
+// Feature 3 - Supplier and Customer Profile Management
+const BusinessPartner = require("./BusinessPartner");
+const Customer = require("./Customer");
+const PerformanceRecord = require("./PerformanceRecord");
+
 // Supplier 1 ---- 0..* Product
 Supplier.hasMany(Product, {
   foreignKey: "supplierId",
@@ -160,6 +165,48 @@ SalesReport.belongsTo(Report, { foreignKey: "reportId", as: "report" });
 Report.hasOne(ExpiryRestockReport, { foreignKey: "reportId", as: "expiryRestockDetails" });
 ExpiryRestockReport.belongsTo(Report, { foreignKey: "reportId", as: "report" });
 
+// ----- Feature 3 - Supplier and Customer Profile Management -----
+
+// BusinessPartner <|---- Supplier, Customer (generalization)
+BusinessPartner.hasOne(Supplier, { foreignKey: "partnerId", as: "supplierProfile" });
+Supplier.belongsTo(BusinessPartner, { foreignKey: "partnerId", as: "partner" });
+
+BusinessPartner.hasOne(Customer, { foreignKey: "partnerId", as: "customerProfile" });
+Customer.belongsTo(BusinessPartner, { foreignKey: "partnerId", as: "partner" });
+
+// Supplier 1 <>---- 0..* PerformanceRecord (accumulates, aggregation)
+// Required: a record cannot exist without its Supplier, and a Supplier with
+// delivery history cannot be deleted.
+Supplier.hasMany(PerformanceRecord, {
+  foreignKey: { name: "supplierId", allowNull: false },
+  as: "performanceRecords",
+  onDelete: "RESTRICT",
+  onUpdate: "CASCADE",
+});
+
+PerformanceRecord.belongsTo(Supplier, {
+  foreignKey: { name: "supplierId", allowNull: false },
+  as: "supplier",
+  onDelete: "RESTRICT",
+  onUpdate: "CASCADE",
+});
+
+// Employee 1 ---- 0..* PerformanceRecord (records)
+// Required: every record names the Employee who recorded it.
+Employee.hasMany(PerformanceRecord, {
+  foreignKey: { name: "employeeId", allowNull: false },
+  as: "performanceRecords",
+  onDelete: "RESTRICT",
+  onUpdate: "CASCADE",
+});
+
+PerformanceRecord.belongsTo(Employee, {
+  foreignKey: { name: "employeeId", allowNull: false },
+  as: "recordedBy",
+  onDelete: "RESTRICT",
+  onUpdate: "CASCADE",
+});
+
 module.exports = {
   Supplier,
   Product,
@@ -177,4 +224,7 @@ module.exports = {
   ExpiryRestockReport,
   ReportFilter,
   ReportExport,
+  BusinessPartner,
+  Customer,
+  PerformanceRecord,
 };
