@@ -110,6 +110,16 @@ Transaction.belongsTo(Ledger, {
   as: "ledger",
 });
 
+Transaction.belongsTo(Supplier, {
+  foreignKey: "supplierId",
+  as: "supplier",
+});
+
+Transaction.belongsTo(BudgetThreshold, {
+  foreignKey: "budgetThresholdId",
+  as: "budgetThreshold",
+});
+
 // Store 1 ---- 1..* Employee (employs)
 Store.hasMany(Employee, {
   foreignKey: "storeId",
