@@ -468,54 +468,89 @@ Run these checks against an appropriately initialized test database. Before usin
 
 ## Feature 5 — Employee Management / Scheduling
 
-The repository also includes Feature 5 models and a scheduling verification script.
+### Purpose
 
-### Domain classes
+The subsystem lets the store owner build a work schedule for a period, add employee shifts to it, edit shift hours and publish the schedule, and lets each employee view their own shifts.
 
-#### StoreOwner
+### Domain classes and attributes
 
-- Attributes: `ownerId`, `ownerName`, `phoneNumber`, `email`
-- Documented operations: `reviewComplaint(complaint)`, `resolveCase(complaint)`, `reviewRestockAlert()`, `editShift(shift, startTime, endTime)`, `publishSchedule(schedule)`
+- **StoreOwner** — `ownerId`, `ownerName`, `phoneNumber`, `email`
+- **Store** — `storeId`, `storeName`, `address`, `ownerId`
+- **Employee** — `employeeId`, `employeeName`, `phoneNumber`, `email`, `role` (for example `Cashier`, `Stock Clerk`), `storeId`
+- **Schedule** — `scheduleId`, `startDate`, `endDate`, `storeId`
+- **EmployeeShift** — `shiftId`, `shiftDate`, `startTime`, `endTime`, `shiftStatus` (`Draft`, `Published`, `Completed` or `Cancelled`; defaults to `Draft`), `employeeId`, `scheduleId`
 
-#### Store
-
-- Attributes: `storeId`, `storeName`, `address`
-
-#### Employee
-
-- Attributes: `employeeId`, `employeeName`, `phoneNumber`, `email`, `role`
-- Documented operations: `viewSchedule()`, `searchAccount(id)`, `assistCustomer()`, `createComplaintCase()`, `addSoldProduct(item)`, `removeSoldProduct(item)`
-
-#### Schedule
-
-- Attributes: `scheduleId`, `startDate`, `endDate`
-- Documented operations: `addShift(shift)`, `displayShifts()`, `save()`
-
-#### EmployeeShift
-
-- Attributes: `shiftId`, `shiftDate`, `startTime`, `endTime`, `shiftStatus`
-- Documented operations: `validate()`, `updateShift(startTime, endTime)`
+A shift's role is not stored on EmployeeShift. Per the class diagram, `role` belongs to Employee, and a shift takes its role from the employee working it.
 
 ### Class relationships
 
-- One StoreOwner can be associated with multiple Stores.
-- One Store can be associated with multiple Employees and Schedules.
-- One Employee can have multiple EmployeeShifts.
-- One Schedule can contain multiple EmployeeShifts.
+- One StoreOwner owns one or many Stores (`stores.ownerId`).
+- One Store employs one or many Employees (`employees.storeId`).
+- One Store has zero or many Schedules (`schedules.storeId`).
+- One Employee works zero or many EmployeeShifts (`employee_shifts.employeeId`).
+- One Schedule contains zero or many EmployeeShifts (aggregation, `employee_shifts.scheduleId`).
+
+### Implemented methods
+
+| Class | Method | What it does |
+| --- | --- | --- |
+| Schedule | `addShift(shift)` | Rejects a shift dated outside the schedule's `startDate`–`endDate`; otherwise links it to the schedule, validates it and saves it |
+| Schedule | `displayShifts()` | Returns every shift in the schedule, ordered by date and start time |
+| Schedule | `save()` | Inherited from Sequelize's `Model`; stores the schedule |
+| EmployeeShift | `validate()` | Runs Sequelize's field checks, then rejects a shift whose end time is not after its start time; runs automatically on every save |
+| EmployeeShift | `updateShift(startTime, endTime)` | Changes the shift's hours, validates and saves |
+| StoreOwner | `editShift(shift, startTime, endTime)` | Lets the owner change a shift's hours through `updateShift()` |
+| StoreOwner | `publishSchedule(schedule)` | Validates every shift in the schedule and sets each to `Published` |
+| Employee | `viewSchedule()` | Returns only that employee's own shifts, ordered by date and start time |
+
+Operations shared with other features are documented in their sections: `StoreOwner.reviewComplaint()`, `resolveCase()` and `Employee.searchAccount()`, `assistCustomer()`, `createComplaintCase()`, `addSoldProduct()`, `removeSoldProduct()` (Feature 6), and `StoreOwner.reviewRestockAlert()` (Feature 1).
+
+### Sample scheduling data
+
+| Item | Sample value |
+| --- | --- |
+| Store owner | `OWN-001` |
+| Store | Marché Aghapy (`STORE-001`) |
+| Employees | `EMP-001` (Cashier), `EMP-002` (Stock Clerk) |
+| Schedule | `SCH-001`, 2026-11-02 to 2026-11-08 |
+| Shifts | `SHIFT-001` (EMP-001, 08:00–16:00) and `SHIFT-002` (EMP-002, 12:00–20:00), both `Draft` |
 
 ### Verify Feature 5
 
-Once the scheduling tables and sample records exist in the local database:
+The check uses the seed data. It saves the sample shifts before testing and restores them afterwards, including after a failed check, so it can be run more than once without changing the sample data. Run it against a fresh test database so it matches the current models:
 
 ```bash
-npm run scheduling:check
+SQLITE_PATH=database/scheduling-test.sqlite npm run db:setup
+SQLITE_PATH=database/scheduling-test.sqlite npm run db:seed
+SQLITE_PATH=database/scheduling-test.sqlite npm run scheduling:check
 ```
 
-The scheduling verification script exercises adding, validating, editing, publishing, and viewing shifts. **It modifies sample scheduling data.**
+The script checks every result with an assertion:
 
-**Known local setup limitation:** An inventory-only SQLite database used during Feature 1 development may contain the `suppliers`, `products`, `inventory_records`, and `restock_alerts` tables but not the scheduling tables. Running the scheduling check against that database can produce `SQLITE_ERROR: no such table: stores`. This does not mean the inventory retrieval check failed. Full combined-system verification requires a separately initialized test database or coordinated team setup.
+1. The store exists with its owner, both employees (each with a role) and schedule `SCH-001` with its sample shifts.
+2. `addShift()` adds `SHIFT-003` to `SCH-001`.
+3. A shift ending before it starts is rejected and not saved.
+4. A shift dated outside the schedule period is rejected and not saved.
+5. `editShift()` changes `SHIFT-002` to 13:00–21:00.
+6. `publishSchedule()` sets every shift in `SCH-001` to `Published`.
+7. `viewSchedule()` returns only `EMP-001`'s shifts.
+8. The sample shifts are restored exactly as they were.
 
-Some Feature 5 operations that depend on classes from other features may remain placeholders. Consult the implementation before assuming that every documented operation is complete.
+Any failed check or database error prints `Scheduling verification failed` and ends with exit code `1`. A successful run ends with:
+
+```text
+Scheduling verification successful.
+```
+
+### Feature 5 limitations
+
+The class attributes, associations and scheduling methods are complete. As a prototype:
+
+- The minimum multiplicities in the class diagram (a StoreOwner owns at least one Store; a Store employs at least one Employee) are documented but not enforced by the database.
+- Double-booking is not checked: an employee can be given two overlapping shifts on the same day.
+- Publishing is recorded on each shift's `shiftStatus`; Schedule has no separate published flag, matching the class diagram.
+- `StoreOwner.editShift()` takes the new start and end time in addition to the shift shown in the class diagram, because the owner must supply the new hours.
+- Scheduling has been verified against the complete six-feature database: every feature's check passes on the same database.
 
 ## Feature 6 — Customer Support
 
