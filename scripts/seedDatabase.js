@@ -13,6 +13,11 @@ const {
   BusinessPartner,
   Customer,
   PerformanceRecord,
+  Sale,
+  SaleItem,
+  ComplaintCase,
+  SupportRequest,
+  ReturnRequest,
 } = require("../src/models");
 
 async function seedDatabase() {
@@ -170,6 +175,56 @@ async function seedDatabase() {
       ],
       { validate: true }
     );
+
+    // ----- Feature 6 - Customer Support -----
+    // The sample customer CUST-001 is created by the Feature 3 seed data above,
+    // so it must stay before these rows.
+
+    const { today: todayString } = require("../src/utils/dates");
+    const today = todayString();
+
+    await Sale.create({
+      saleId: "SALE-001",
+      saleDate: today,
+      totalAmount: 0,
+      paymentMethod: "Debit",
+      customerId: "CUST-001",
+      employeeId: "EMP-001",
+    });
+
+    // addItem() also recalculates the sale total: 3 x 2.50 = 7.50.
+    const sale = await Sale.findByPk("SALE-001");
+    await sale.addItem({ productId: "PROD-001", quantity: 3, unitPrice: 2.5 });
+
+    await SupportRequest.create({
+      requestId: "REQ-001",
+      requestDate: today,
+      subject: "Question about an order",
+      description: "Customer asked whether the last order was charged correctly.",
+      requestStatus: "Open",
+      customerId: "CUST-001",
+      employeeId: "EMP-001",
+    });
+
+    await ComplaintCase.create({
+      caseId: "CASE-001",
+      category: "Product quality",
+      description: "A can of Foul Medames was dented when purchased.",
+      status: "Open",
+      dateCreated: today,
+      customerId: "CUST-001",
+      employeeId: "EMP-001",
+    });
+
+    await ReturnRequest.create({
+      returnId: "RET-001",
+      reason: "Damaged product",
+      amount: 2.5,
+      status: "Pending",
+      customerId: "CUST-001",
+      saleId: "SALE-001",
+      employeeId: "EMP-001",
+    });
 
     console.log("Sample data inserted successfully.");
   } catch (error) {
