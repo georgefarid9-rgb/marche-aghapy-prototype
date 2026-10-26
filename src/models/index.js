@@ -19,6 +19,15 @@ const ExpiryRestockReport = require("./ExpiryRestockReport");
 const ReportFilter = require("./ReportFilter");
 const ReportExport = require("./ReportExport");
 
+
+ // Feature 4 - Accounting
+const Transaction = require("./Transaction");
+const Revenue = require("./Revenue");
+const Expense = require("./Expense");
+const Ledger = require("./Ledger");
+const BudgetThreshold = require("./BudgetThreshold");
+const FinancialReport = require("./FinancialReport");
+
 // Feature 3 - Supplier and Customer Profile Management
 const BusinessPartner = require("./BusinessPartner");
 const Customer = require("./Customer");
@@ -30,6 +39,7 @@ const SupportRequest = require("./SupportRequest");
 const ReturnRequest = require("./ReturnRequest");
 const Sale = require("./Sale");
 const SaleItem = require("./SaleItem");
+
 
 // Supplier 1 ---- 0..* Product
 Supplier.hasMany(Product, {
@@ -81,6 +91,53 @@ StoreOwner.hasMany(Store, {
 Store.belongsTo(StoreOwner, {
   foreignKey: "ownerId",
   as: "owner",
+});
+
+
+ // ----- Feature 4 - Accounting -----
+
+// Store maintains its ledger
+Store.hasOne(Ledger, {
+  foreignKey: "storeId",
+  as: "ledger",
+});
+
+Ledger.belongsTo(Store, {
+  foreignKey: "storeId",
+  as: "store",
+});
+
+
+Ledger.hasMany(FinancialReport, {
+  foreignKey: "ledgerId",
+  as: "financialReports",
+});
+
+FinancialReport.belongsTo(Ledger, {
+  foreignKey: "ledgerId",
+  as: "ledger",
+});
+
+
+// Ledger contains transactions
+Ledger.hasMany(Transaction, {
+  foreignKey: "ledgerId",
+  as: "transactions",
+});
+
+Transaction.belongsTo(Ledger, {
+  foreignKey: "ledgerId",
+  as: "ledger",
+});
+
+Transaction.belongsTo(Supplier, {
+  foreignKey: "supplierId",
+  as: "supplier",
+});
+
+Transaction.belongsTo(BudgetThreshold, {
+  foreignKey: "budgetThresholdId",
+  as: "budgetThreshold",
 });
 
 // Store 1 ---- 1..* Employee (employs)
@@ -168,6 +225,17 @@ InventoryReport.belongsTo(Report, { foreignKey: "reportId", as: "report" });
 
 Report.hasOne(SalesReport, { foreignKey: "reportId", as: "salesDetails" });
 SalesReport.belongsTo(Report, { foreignKey: "reportId", as: "report" });
+
+
+Report.hasOne(FinancialReport, {
+  foreignKey: "reportId",
+  as: "financialDetails",
+});
+
+FinancialReport.belongsTo(Report, {
+  foreignKey: "reportId",
+  as: "report",
+});
 
 Report.hasOne(ExpiryRestockReport, { foreignKey: "reportId", as: "expiryRestockDetails" });
 ExpiryRestockReport.belongsTo(Report, { foreignKey: "reportId", as: "report" });
@@ -375,6 +443,11 @@ module.exports = {
   Product,
   InventoryRecord,
   RestockAlert,
+  Transaction,
+  Revenue,
+  Expense,
+  Ledger,
+  BudgetThreshold,
   StoreOwner,
   Store,
   Employee,
@@ -382,6 +455,7 @@ module.exports = {
   EmployeeShift,
   DashboardSummary,
   Report,
+  FinancialReport,
   InventoryReport,
   SalesReport,
   ExpiryRestockReport,
