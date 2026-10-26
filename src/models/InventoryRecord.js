@@ -14,7 +14,7 @@ class InventoryRecord extends Model {
 
     return "IN_STOCK";
   }
-  
+
 async updateQuantity(newQuantity) {
   if (!Number.isSafeInteger(newQuantity) || newQuantity < 0) {
     throw new Error("Quantity must be a non-negative integer.");
@@ -47,7 +47,7 @@ InventoryRecord.init(
       allowNull: false,
       defaultValue: 0,
     },
-    
+
 reorderLevel: {
   type: DataTypes.INTEGER,
   allowNull: false,

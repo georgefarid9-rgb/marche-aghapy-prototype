@@ -1,3 +1,4 @@
+
 {
   "name": "marche-aghapy-prototype",
   "version": "1.0.0",
@@ -9,8 +10,13 @@
     "db:seed": "node scripts/seedDatabase.js",
     "prototype:check": "node scripts/verifyPrototype.js",
     "scheduling:check": "node scripts/verifyScheduling.js",
+    "accounting:check": "node scripts/verifyAccounting.js",
+    "accounting-reports:check": "node scripts/verifyAccountingReports.js",
     "profiles:check": "node scripts/verifyProfiles.js",
-    "profiles:migrate": "node scripts/migrateFeature3Profiles.js"
+    "reports:check": "node scripts/verifyReports.js",
+    "profiles:migrate": "node scripts/migrateFeature3Profiles.js",
+    "support:check": "node scripts/verifyCustomerSupport.js",
+    "support:migrate": "node scripts/migrateFeature6Support.js"
   },
   "repository": {
     "type": "git",
