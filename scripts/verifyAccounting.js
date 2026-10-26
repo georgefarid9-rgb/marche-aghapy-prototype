@@ -20,11 +20,19 @@ async function verifyAccounting() {
       where: { ledgerId },
     });
 
-    const ledger = await Ledger.create({
-      ledgerId,
-      currentBalance: 0,
-      periodStartDate: "2026-10-01",
-    });
+const Store = require("../src/models").Store;
+const store = await Store.findOne();
+
+if (!store) {
+  throw new Error("No store exists in the test database. Cannot test accounting.");
+}
+
+const ledger = await Ledger.create({
+  ledgerId,
+  storeId: store.storeId,
+  currentBalance: 0,
+  periodStartDate: "2026-10-01",
+});
 
     const revenue = Transaction.build({
       transactionId: revenueId,
@@ -68,11 +76,12 @@ async function verifyAccounting() {
       summary.totalExpenses === 120 &&
       summary.transactionCount === 2;
 
-    console.log(
-      passed
-        ? "Accounting verification successful."
-        : "Accounting verification failed."
-    );
+    if (!passed) {
+  console.error("Accounting verification failed.");
+  process.exitCode = 1;
+} else {
+  console.log("Accounting verification successful.");
+}
   } catch (error) {
     console.error("Accounting verification failed:");
     console.error(error);

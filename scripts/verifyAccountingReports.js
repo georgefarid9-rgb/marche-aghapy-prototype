@@ -36,11 +36,19 @@ async function verifyAccountingReports() {
     });
 
     // Create a ledger and two transactions.
-    const ledger = await Ledger.create({
-      ledgerId: ids.ledger,
-      currentBalance: 0,
-      periodStartDate: "2026-10-01",
-    });
+   const Store = require("../src/models").Store;
+const store = await Store.findOne();
+
+if (!store) {
+  throw new Error("No store exists in the test database.");
+}
+
+const ledger = await Ledger.create({
+  ledgerId: ids.ledger,
+  storeId: store.storeId,
+  currentBalance: 0,
+  periodStartDate: "2026-10-01",
+});
 
     await ledger.addTransaction(
       Transaction.build({
@@ -66,17 +74,20 @@ async function verifyAccountingReports() {
 
     // Create the parent report before its financial details.
     await Report.create({
-      reportId: ids.report,
-      reportType: "sales",
-      periodStart: "2026-10-01",
-      periodEnd: "2026-10-31",
-    });
+  reportId: ids.report,
+  reportType: "financial",
+  periodStart: "2026-10-01",
+  periodEnd: "2026-10-31",
+});
 
-    const financialReport = await FinancialReport.create({
-      reportId: ids.report,
-      periodStart: "2026-10-01",
-      periodEnd: "2026-10-31",
-    });
+
+const financialReport = await FinancialReport.create({
+  reportId: ids.report,
+  ledgerId: ids.ledger,
+  periodStart: "2026-10-01",
+  periodEnd: "2026-10-31",
+});
+
 
     const totals = await financialReport.calculateTotals();
 

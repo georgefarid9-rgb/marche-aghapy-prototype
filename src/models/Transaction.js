@@ -31,7 +31,7 @@ Transaction.init(
       primaryKey: true,
       allowNull: false,
     },
-    
+
     ledgerId: {
       type: DataTypes.STRING,
       allowNull: true,
@@ -40,6 +40,32 @@ Transaction.init(
         key: "ledgerId",
       },
     },
+
+    // New field: optional due date for expenses
+    dueDate: {
+      type: DataTypes.DATEONLY,
+      allowNull: true,
+    },
+
+    // New field: optional supplier linked to an expense
+    supplierId: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      references: {
+        model: "suppliers",
+        key: "supplierId",
+      },
+    },
+
+    budgetThresholdId: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      references: {
+        model: "budget_thresholds",
+        key: "thresholdId",
+      },
+    },
+
 
     date: {
       type: DataTypes.DATEONLY,

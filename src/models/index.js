@@ -21,6 +21,8 @@ const ReportExport = require("./ReportExport");
 
 // Feature 4 - Accounting
 const Transaction = require("./Transaction");
+const Revenue = require("./Revenue");
+const Expense = require("./Expense");
 const Ledger = require("./Ledger");
 const BudgetThreshold = require("./BudgetThreshold");
 const FinancialReport = require("./FinancialReport");
@@ -74,16 +76,28 @@ Store.belongsTo(StoreOwner, {
 
  // ----- Feature 4 - Accounting -----
 
-// StoreOwner manages ledgers
-StoreOwner.hasMany(Ledger, {
-  foreignKey: "ownerId",
-  as: "ledgers",
+// Store maintains its ledger
+Store.hasOne(Ledger, {
+  foreignKey: "storeId",
+  as: "ledger",
 });
 
-Ledger.belongsTo(StoreOwner, {
-  foreignKey: "ownerId",
-  as: "owner",
+Ledger.belongsTo(Store, {
+  foreignKey: "storeId",
+  as: "store",
 });
+
+
+Ledger.hasMany(FinancialReport, {
+  foreignKey: "ledgerId",
+  as: "financialReports",
+});
+
+FinancialReport.belongsTo(Ledger, {
+  foreignKey: "ledgerId",
+  as: "ledger",
+});
+
 
 // Ledger contains transactions
 Ledger.hasMany(Transaction, {
@@ -202,6 +216,8 @@ module.exports = {
   InventoryRecord,
   RestockAlert,
   Transaction,
+  Revenue,
+  Expense,
   Ledger,
   BudgetThreshold,
   StoreOwner,

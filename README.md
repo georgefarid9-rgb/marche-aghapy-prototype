@@ -1,12 +1,12 @@
 # Marché Aghapy Store Management System Prototype
 
-BTM 495 Prototype
+**BTM 495 Prototype**
 
 ## Overview
 
-This repository contains the prototype implementation for the Marché Aghapy Store Management System.
+This repository contains a prototype of the Marché Aghapy Store Management System, built with Node.js, Sequelize, and SQLite.
 
-The current prototype includes the Product and Inventory Management subsystem.
+The prototype includes Product and Inventory Management, Scheduling, and Accounting functionality.
 
 ## Technologies
 
@@ -17,31 +17,23 @@ The current prototype includes the Product and Inventory Management subsystem.
 
 ## Current Domain Classes
 
-### Supplier
-- supplierId
-- supplierName
-- leadTimeDays
+### Product and Inventory Management
 
-### Product
-- productId
-- productName
-- description
+- **Supplier** — supplier details and lead time
+- **Product** — product information
+- **InventoryRecord** — inventory quantities, expiry dates, and update information
+- **RestockAlert** — restocking information
 
-### InventoryRecord
-- inventoryId
-- quantityOnHand
-- expiryDate
-- lastUpdated
+### Scheduling
 
-### RestockAlert
-- alertId
-- reorderInformation
+The scheduling subsystem supports stores, owners, employees, and employee shifts, including shift creation, editing, validation, and schedule viewing.
 
-## Class Relationships
+### Accounting
 
-- One Supplier can supply zero or many Products.
-- Each Product has one InventoryRecord.
-- One InventoryRecord can generate zero or many RestockAlerts.
+- **Ledger** — maintains a store's ledger and calculates its balance and transaction summary
+- **Transaction** — records revenue and expenses with transaction details
+- **FinancialReport** — calculates revenue, expenses, and net profit for a ledger and reporting period
+- **BudgetThreshold** — checks whether an amount exceeds a configured budget limit
 
 ## Installation
 
@@ -51,95 +43,66 @@ Install project dependencies:
 npm install
 ```
 
-## Test Database Connection
+## Database Commands
+
+Test the database connection:
 
 ```bash
 npm run db:test
 ```
 
-## Create Database Tables
+Create database tables:
 
 ```bash
 npm run db:setup
 ```
 
-## Insert Sample Data
+**Warning:** The setup script recreates database tables and may delete existing data. Use only when it is safe to reset the database.
+
+Insert sample data:
 
 ```bash
 npm run db:seed
 ```
 
-## Verify Prototype
+## Verification Commands
+
+Verify the prototype:
 
 ```bash
 npm run prototype:check
 ```
 
-The verification script retrieves a Product together with its related Supplier, InventoryRecord, and RestockAlert.
+Verify scheduling:
+
+```bash
+npm run scheduling:check
+```
+
+Verify accounting:
+
+```bash
+npm run accounting:check
+```
+
+Verify accounting reports and budget thresholds:
+
+```bash
+npm run accounting-reports:check
+```
+
+The accounting verification scripts test ledger transactions, balance calculations, financial report totals, and budget threshold checks.
 
 ## Database
 
-The project uses SQLite.
-
-The generated database file is created locally at:
+The project uses SQLite. The default database file is:
 
 ```text
 database/marche-aghapy.sqlite
 ```
 
-The SQLite database file is excluded from Git version control and can be recreated using the database setup and seed scripts.
+Database files are excluded from Git version control. Verification scripts should be run against an appropriately prepared database.
 
 ## Git Workflow
 
-Development is performed using feature branches.
-
-Current inventory development branch:
-
-```text
-feature/inventory
-```
-
-## Feature 5 – Employee Management / Scheduling
-
-Branch: `feature/employee-scheduling`
-
-### Domain Classes
-
-#### StoreOwner
-- ownerId, ownerName, phoneNumber, email
-- reviewComplaint(complaint), resolveCase(complaint), reviewRestockAlert(), editShift(shift, startTime, endTime), publishSchedule(schedule)
-
-#### Store
-- storeId, storeName, address
-
-#### Employee
-- employeeId, employeeName, phoneNumber, email, role
-- viewSchedule(), searchAccount(id), assistCustomer(), createComplaintCase(), addSoldProduct(item), removeSoldProduct(item)
-
-#### Schedule
-- scheduleId, startDate, endDate
-- addShift(shift), displayShifts(), save()
-
-#### EmployeeShift
-- shiftId, shiftDate, startTime, endTime, shiftStatus
-- validate(), updateShift(startTime, endTime)
-
-### Class Relationships
-
-- One StoreOwner owns one or many Stores.
-- One Store employs one or many Employees.
-- One Store has zero or many Schedules.
-- One Employee works zero or many EmployeeShifts.
-- One Schedule contains zero or many EmployeeShifts (aggregation).
-
-### Verify Feature 5
-
-```bash
-npm run db:setup
-npm run db:seed
-npm run scheduling:check
-```
-
-Methods that depend on other features' classes (Customer, ComplaintCase, SaleItem) are placeholders until those teams add their classes.
-
-The script adds a shift, shows an invalid shift being rejected, edits a shift as the store owner, publishes the schedule, and shows one employee's own schedule.
+Development is performed using feature branches. Make sure your changes are committed to the correct feature branch before submitting or merging them.

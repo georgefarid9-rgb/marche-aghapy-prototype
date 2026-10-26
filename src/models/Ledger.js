@@ -91,12 +91,12 @@ Ledger.init(
       allowNull: false,
     },
 
-    ownerId: {
+    storeId: {
       type: DataTypes.STRING,
-      allowNull: true,
+      allowNull: false,
       references: {
-        model: "store_owners",
-        key: "ownerId",
+        model: "stores",
+        key: "storeId",
       },
     },
   },

@@ -1,16 +1,21 @@
 
-const { Model, DataTypes } = require("sequelize");
+const { Model, DataTypes, Op } = require("sequelize");
 const sequelize = require("../database");
 
 class FinancialReport extends Model {
   async compile() {
     const Transaction = require("./Transaction");
 
+    if (!this.ledgerId) {
+      throw new Error("A ledgerId is required to compile a financial report.");
+    }
+
     const transactions = await Transaction.findAll({
       where: {
+        ledgerId: this.ledgerId,
         date: {
-          [require("sequelize").Op.gte]: this.periodStart,
-          [require("sequelize").Op.lte]: this.periodEnd,
+          [Op.gte]: this.periodStart,
+          [Op.lte]: this.periodEnd,
         },
       },
     });
@@ -37,9 +42,9 @@ class FinancialReport extends Model {
     await this.compile();
 
     return {
-      totalRevenue: this.totalRevenue,
-      totalExpenses: this.totalExpenses,
-      netProfit: this.netProfit,
+      totalRevenue: Number(this.totalRevenue),
+      totalExpenses: Number(this.totalExpenses),
+      netProfit: Number(this.netProfit),
     };
   }
 }
@@ -50,31 +55,37 @@ FinancialReport.init(
       type: DataTypes.STRING,
       primaryKey: true,
       allowNull: false,
-      references: { model: "reports", key: "reportId" },
+      references: {
+        model: "reports",
+        key: "reportId",
+      },
     },
-
+    ledgerId: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      references: {
+        model: "ledgers",
+        key: "ledgerId",
+      },
+    },
     periodStart: {
       type: DataTypes.DATEONLY,
       allowNull: false,
     },
-
     periodEnd: {
       type: DataTypes.DATEONLY,
       allowNull: false,
     },
-
     totalRevenue: {
       type: DataTypes.DOUBLE,
       allowNull: false,
       defaultValue: 0,
     },
-
     totalExpenses: {
       type: DataTypes.DOUBLE,
       allowNull: false,
       defaultValue: 0,
     },
-
     netProfit: {
       type: DataTypes.DOUBLE,
       allowNull: false,
