@@ -96,7 +96,7 @@ class InventoryController {
     }
   }
 
-  // 3. Create a product and its inventory in one transaction.
+  // 3. Create a product and inventory in one transaction.
   async submitNewProduct(data) {
     this.selectedTask = "NEW";
     this.pendingData = data;
@@ -113,7 +113,6 @@ class InventoryController {
     try {
       const result = await sequelize.transaction(
         async (transaction) => {
-          // Check for duplicate IDs.
           if (
             await Product.findByPk(details.productId, {
               transaction,
@@ -130,7 +129,6 @@ class InventoryController {
             throw new Error("Inventory ID already exists.");
           }
 
-          // Check that the supplier exists, if provided.
           if (
             details.supplierId &&
             !(await Supplier.findByPk(details.supplierId, {
@@ -140,7 +138,6 @@ class InventoryController {
             throw new Error("Supplier does not exist.");
           }
 
-          // Create the product.
           const product = Product.build({
             productId: details.productId,
             productName: details.productName,
@@ -153,7 +150,6 @@ class InventoryController {
             transaction,
           });
 
-          // Create its inventory record.
           const inventory = InventoryRecord.build();
 
           await inventory.createInventoryRecord(
@@ -167,7 +163,6 @@ class InventoryController {
             { transaction }
           );
 
-          // Evaluate replenishment within the same transaction.
           const alert = await this._tryGenerateAlert(
             inventory,
             { transaction }
@@ -177,7 +172,6 @@ class InventoryController {
         }
       );
 
-      // Only report success after the transaction commits.
       this.lastResult = {
         product: result.product,
         inventory: result.inventory,
@@ -186,7 +180,6 @@ class InventoryController {
       this.lastAlert = result.alert;
       return true;
     } catch (error) {
-      // Sequelize has already rolled back the transaction.
       this.lastError = error.message;
       return false;
     }
@@ -249,7 +242,6 @@ class InventoryController {
             throw new Error("Invalid product information.");
           }
 
-          // Update the product when product fields were supplied.
           if (
             PRODUCT_FIELDS.some((field) => hasOwn(details, field))
           ) {
@@ -258,7 +250,6 @@ class InventoryController {
             });
           }
 
-          // Update inventory when inventory fields were supplied.
           if (
             INVENTORY_FIELDS.some((field) => hasOwn(details, field))
           ) {
@@ -267,7 +258,6 @@ class InventoryController {
             });
           }
 
-          // Update the restock alert inside the same transaction.
           const alert = await this._tryGenerateAlert(
             inventory,
             { transaction }
@@ -290,7 +280,7 @@ class InventoryController {
     }
   }
 
-  // 6. Validate the information before saving.
+  // 6. Validate information before saving.
   validateSubmittedData() {
     const details = parseData(this.pendingData);
 
@@ -371,7 +361,6 @@ class InventoryController {
       }
     }
 
-    // Validate quantities and reorder levels.
     for (const field of ["quantityOnHand", "reorderLevel"]) {
       if (
         hasOwn(details, field) &&
@@ -386,7 +375,6 @@ class InventoryController {
       }
     }
 
-    // Validate expiry date.
     if (
       hasOwn(details, "expiryDate") &&
       !validDate(details.expiryDate)
@@ -396,7 +384,6 @@ class InventoryController {
       return false;
     }
 
-    // Validate optional product information.
     for (const field of ["description", "category"]) {
       if (
         hasOwn(details, field) &&
@@ -430,7 +417,7 @@ class InventoryController {
     return this.validateSubmittedData();
   }
 
-  // Internal helper: update restock alerts in the same transaction.
+  // Internal helper: create, refresh, or resolve a restock alert.
   async _tryGenerateAlert(inventory, { transaction } = {}) {
     const product = await Product.findByPk(inventory.productId, {
       include: [
@@ -467,7 +454,7 @@ class InventoryController {
         daysLeft <= leadTime
       );
 
-    // Resolve pending alerts when stock is healthy.
+    // Resolve pending alerts if replenishment is no longer needed.
     if (stockStatus === "IN_STOCK" && !expiryRisk) {
       await RestockAlert.update(
         { alertStatus: "RESOLVED" },
@@ -483,7 +470,7 @@ class InventoryController {
       return null;
     }
 
-    // Reuse an existing pending alert.
+    // Find an existing pending alert.
     const existing = await RestockAlert.findOne({
       where: {
         inventoryId: inventory.inventoryId,
@@ -493,10 +480,15 @@ class InventoryController {
     });
 
     if (existing) {
+      // NEW: Refresh the existing alert instead of reusing
+      // its outdated recommended quantity and message.
+      await existing.generateRestockAlert({ transaction });
+
+      // Preserve the existing alertId and avoid duplicates.
       return existing;
     }
 
-    // Generate the new alert inside the transaction.
+    // No pending alert exists, so create a new one.
     const alert = RestockAlert.build({
       alertId: generateId("ALERT"),
       inventoryId: inventory.inventoryId,

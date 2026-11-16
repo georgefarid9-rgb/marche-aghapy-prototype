@@ -4,11 +4,11 @@ const sequelize = require("../database");
 const { today, daysBetween } = require("../utils/dates");
 
 class RestockAlert extends Model {
-  // Generate an alert when inventory requires replenishment.
-  // options allows this operation to join a database transaction.
+  // Create a new restock alert or refresh an existing pending alert.
   async generateRestockAlert(options = {}) {
-    if (!this.isNewRecord) {
-      throw new Error("This restock alert has already been saved.");
+    // Resolved alerts are historical records and cannot be reopened.
+    if (!this.isNewRecord && this.alertStatus !== "PENDING") {
+      throw new Error("Only pending restock alerts can be refreshed.");
     }
 
     if (typeof this.alertId !== "string" || !this.alertId.trim()) {
@@ -19,9 +19,9 @@ class RestockAlert extends Model {
       throw new Error("Inventory ID is required.");
     }
 
-    // Load the inventory record, its product, and its supplier.
     const { InventoryRecord, Product, Supplier } = sequelize.models;
 
+    // Retrieve the latest inventory, product, and supplier information.
     const inventory = await InventoryRecord.findByPk(
       this.inventoryId,
       {
@@ -47,7 +47,6 @@ class RestockAlert extends Model {
     const stockStatus = inventory.evaluateInventoryStatus();
     const expiryStatus = inventory.evaluateExpiryConditions();
 
-    // Use the supplier's lead time when available.
     const leadTimeDays =
       Number.isSafeInteger(supplier?.leadTimeDays) &&
       supplier.leadTimeDays >= 0
@@ -58,6 +57,7 @@ class RestockAlert extends Model {
       ? daysBetween(today(), inventory.expiryDate)
       : null;
 
+    // Evaluate replenishment using stock and expiry conditions.
     const expiryRisk =
       expiryStatus === "EXPIRED" ||
       expiryStatus === "NEAR_EXPIRY" ||
@@ -78,17 +78,18 @@ class RestockAlert extends Model {
       );
     }
 
-    // Recommend enough stock to exceed the reorder threshold.
-    // Stock at risk of expiring is not counted as available.
+    // Stock at risk of expiring is excluded from available stock.
     const availableStock = expiryRisk
       ? 0
       : inventory.quantityOnHand;
 
+    // Recalculate whenever this method is called.
     const recommendedQuantity = Math.max(
       1,
       inventory.reorderLevel + 1 - availableStock
     );
 
+    // Build the reorder message using the latest information.
     const reorderInformation = [
       `Reorder ${recommendedQuantity} unit(s) of ${product.productName}.`,
       `Current stock: ${inventory.quantityOnHand}.`,
@@ -102,13 +103,15 @@ class RestockAlert extends Model {
       }.`,
     ].join(" ");
 
+    // For an existing pending alert, preserve its original alertId.
+    // Only the recommendation and message are refreshed.
     this.set({
       reorderInformation,
       recommendedQuantity,
       alertStatus: "PENDING",
     });
 
-    // Save within the supplied transaction, if there is one.
+    // Create or update within the supplied transaction.
     await this.save(options);
   }
 }
