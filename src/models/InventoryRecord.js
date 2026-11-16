@@ -64,24 +64,24 @@ function calculateStockStatus(quantity, reorderLevel) {
 
 class InventoryRecord extends Model {
   // Update the quantity and its corresponding stock status.
-  async updateQuantity(qty) {
+  async updateQuantity(qty, options = {}) {
     validateQuantity(qty, "Quantity");
 
     await this.update({
       quantityOnHand: qty,
       inventoryStatus: calculateStockStatus(qty, this.reorderLevel),
       lastUpdated: new Date(),
-    });
+    }, options);
   }
 
   // Save an expiry date previously assigned to the record.
-  async updateExpiryInformation() {
+  async updateExpiryInformation(options = {}) {
     validateExpiryDate(this.expiryDate);
 
     await this.update({
       expiryDate: this.expiryDate,
       lastUpdated: new Date(),
-    });
+    }, options);
   }
 
   // Determine the product's current stock condition.
@@ -114,7 +114,7 @@ class InventoryRecord extends Model {
   }
 
   // Create and save a new inventory record.
-  async createInventoryRecord(data) {
+  async createInventoryRecord(data, options = {}) {
     if (!this.isNewRecord) {
       throw new Error("This inventory record already exists.");
     }
@@ -149,7 +149,7 @@ class InventoryRecord extends Model {
       lastUpdated: new Date(),
     });
 
-    await this.save();
+    await this.save(options);
   }
 
   // Evaluate stock and expiry conditions together.
@@ -161,7 +161,7 @@ class InventoryRecord extends Model {
   }
 
   // Update the selected inventory fields.
-  async updateInventoryInformation(data) {
+  async updateInventoryInformation(data, options = {}) {
     if (this.isNewRecord) {
       throw new Error("The inventory record must be saved first.");
     }
@@ -212,7 +212,7 @@ class InventoryRecord extends Model {
       ...changes,
       inventoryStatus: calculateStockStatus(quantity, reorderLevel),
       lastUpdated: new Date(),
-    });
+    }, options);
   }
 }
 

@@ -56,7 +56,7 @@ class Product extends Model {
   }
 
   // Save a newly created product.
-  async recordNewProduct(data) {
+  async recordNewProduct(data, options = {}) {
     if (!this.isNewRecord) {
       throw new Error("This product already exists.");
     }
@@ -81,11 +81,11 @@ class Product extends Model {
       }
     }
 
-    await this.save();
+    await this.save(options);
   }
 
   // Update an existing product's information.
-  async updateProductInformation(data) {
+  async updateProductInformation(data, options = {}) {
     if (this.isNewRecord) {
       throw new Error("The product must be saved first.");
     }
@@ -118,7 +118,7 @@ class Product extends Model {
       }
     }
 
-    await this.update(changes);
+    await this.update(changes, options);
   }
 
   // Return the product object.
