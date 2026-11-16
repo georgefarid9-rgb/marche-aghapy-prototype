@@ -5,7 +5,8 @@ const { today, daysBetween } = require("../utils/dates");
 
 class RestockAlert extends Model {
   // Generate an alert when inventory requires replenishment.
-  async generateRestockAlert() {
+  // options allows this operation to join a database transaction.
+  async generateRestockAlert(options = {}) {
     if (!this.isNewRecord) {
       throw new Error("This restock alert has already been saved.");
     }
@@ -32,6 +33,7 @@ class RestockAlert extends Model {
             as: "supplier",
           }],
         }],
+        transaction: options.transaction,
       }
     );
 
@@ -45,7 +47,7 @@ class RestockAlert extends Model {
     const stockStatus = inventory.evaluateInventoryStatus();
     const expiryStatus = inventory.evaluateExpiryConditions();
 
-    // Use the supplier's lead time if one is available.
+    // Use the supplier's lead time when available.
     const leadTimeDays =
       Number.isSafeInteger(supplier?.leadTimeDays) &&
       supplier.leadTimeDays >= 0
@@ -71,10 +73,12 @@ class RestockAlert extends Model {
       expiryRisk;
 
     if (!needsRestock) {
-      throw new Error("This product does not currently need restocking.");
+      throw new Error(
+        "This product does not currently need restocking."
+      );
     }
 
-    // Aim for one unit above the reorder threshold.
+    // Recommend enough stock to exceed the reorder threshold.
     // Stock at risk of expiring is not counted as available.
     const availableStock = expiryRisk
       ? 0
@@ -104,7 +108,8 @@ class RestockAlert extends Model {
       alertStatus: "PENDING",
     });
 
-    await this.save();
+    // Save within the supplied transaction, if there is one.
+    await this.save(options);
   }
 }
 

@@ -1,18 +1,40 @@
 
-const { Product, InventoryRecord, RestockAlert, Supplier } = require("../models");
+const sequelize = require("../database");
+
+const {
+  Product,
+  InventoryRecord,
+  RestockAlert,
+  Supplier,
+} = require("../models");
+
 const generateId = require("../utils/generateId");
 const { today, daysBetween } = require("../utils/dates");
 
-const PRODUCT_FIELDS = ["productName", "description", "category", "supplierId"];
-const INVENTORY_FIELDS = ["quantityOnHand", "reorderLevel", "expiryDate"];
+const PRODUCT_FIELDS = [
+  "productName",
+  "description",
+  "category",
+  "supplierId",
+];
+
+const INVENTORY_FIELDS = [
+  "quantityOnHand",
+  "reorderLevel",
+  "expiryDate",
+];
 
 function parseData(data) {
   if (typeof data !== "string") return null;
 
   try {
     const result = JSON.parse(data);
-    return result && typeof result === "object" && !Array.isArray(result)
-      ? result : null;
+
+    return result &&
+      typeof result === "object" &&
+      !Array.isArray(result)
+      ? result
+      : null;
   } catch {
     return null;
   }
@@ -21,14 +43,19 @@ function parseData(data) {
 function validDate(value) {
   if (value === null) return true;
 
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+  if (
+    typeof value !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(value)
+  ) {
     return false;
   }
 
   const parsed = new Date(`${value}T00:00:00Z`);
 
-  return !Number.isNaN(parsed.getTime()) &&
-    parsed.toISOString().slice(0, 10) === value;
+  return (
+    !Number.isNaN(parsed.getTime()) &&
+    parsed.toISOString().slice(0, 10) === value
+  );
 }
 
 function hasOwn(object, field) {
@@ -37,7 +64,6 @@ function hasOwn(object, field) {
 
 class InventoryController {
   constructor() {
-    // The InventoryPage will set these based on the user's selections.
     this.selectedTask = null;
     this.selectedProductId = null;
     this.pendingData = null;
@@ -48,147 +74,215 @@ class InventoryController {
     this.lastAlert = null;
   }
 
-  // 1. Retrieve all current inventory records.
+  // 1. Retrieve the current inventory.
   async retrieveInventory() {
     return InventoryRecord.findAll({
-      include: [{ model: Product, as: "product" }],
+      include: [
+        { model: Product, as: "product" },
+      ],
       order: [["inventoryId", "ASC"]],
     });
   }
 
-  // 2. Execute the maintenance task selected by the user.
+  // 2. Execute the selected maintenance task.
   async executeSelectedSubflow() {
     if (this.selectedTask === "NEW") {
       await this.submitNewProduct(this.pendingData);
     } else if (this.selectedTask === "UPDATE") {
       await this.submitUpdates(this.pendingData);
     } else {
-      this.lastError = "Select an inventory maintenance task first.";
+      this.lastError =
+        "Select an inventory maintenance task first.";
     }
   }
 
-  // 3. Record a new product and its inventory information.
+  // 3. Create a product and its inventory in one transaction.
   async submitNewProduct(data) {
     this.selectedTask = "NEW";
     this.pendingData = data;
-    this.lastError = this.lastWarning = this.lastResult = this.lastAlert = null;
+
+    this.lastError = null;
+    this.lastWarning = null;
+    this.lastResult = null;
+    this.lastAlert = null;
 
     if (!this.validateSubmittedData()) return false;
 
     const details = parseData(data);
-    let product = null;
-    let inventory = null;
 
     try {
-      if (await Product.findByPk(details.productId)) {
-        throw new Error("Product ID already exists.");
-      }
+      const result = await sequelize.transaction(
+        async (transaction) => {
+          // Check for duplicate IDs.
+          if (
+            await Product.findByPk(details.productId, {
+              transaction,
+            })
+          ) {
+            throw new Error("Product ID already exists.");
+          }
 
-      if (await InventoryRecord.findByPk(details.inventoryId)) {
-        throw new Error("Inventory ID already exists.");
-      }
+          if (
+            await InventoryRecord.findByPk(details.inventoryId, {
+              transaction,
+            })
+          ) {
+            throw new Error("Inventory ID already exists.");
+          }
 
-      if (details.supplierId && !(await Supplier.findByPk(details.supplierId))) {
-        throw new Error("Supplier does not exist.");
-      }
+          // Check that the supplier exists, if provided.
+          if (
+            details.supplierId &&
+            !(await Supplier.findByPk(details.supplierId, {
+              transaction,
+            }))
+          ) {
+            throw new Error("Supplier does not exist.");
+          }
 
-      product = Product.build({
-        productId: details.productId,
-        productName: details.productName,
-        description: details.description ?? null,
-        category: details.category ?? null,
-        supplierId: details.supplierId ?? null,
-      });
+          // Create the product.
+          const product = Product.build({
+            productId: details.productId,
+            productName: details.productName,
+            description: details.description ?? null,
+            category: details.category ?? null,
+            supplierId: details.supplierId ?? null,
+          });
 
-      await product.recordNewProduct(data);
+          await product.recordNewProduct(data, {
+            transaction,
+          });
 
-      inventory = InventoryRecord.build();
+          // Create its inventory record.
+          const inventory = InventoryRecord.build();
 
-      await inventory.createInventoryRecord(JSON.stringify({
-        inventoryId: details.inventoryId,
-        productId: details.productId,
-        quantityOnHand: details.quantityOnHand,
-        reorderLevel: details.reorderLevel ?? 0,
-        expiryDate: details.expiryDate ?? null,
-      }));
+          await inventory.createInventoryRecord(
+            JSON.stringify({
+              inventoryId: details.inventoryId,
+              productId: details.productId,
+              quantityOnHand: details.quantityOnHand,
+              reorderLevel: details.reorderLevel ?? 0,
+              expiryDate: details.expiryDate ?? null,
+            }),
+            { transaction }
+          );
 
-      this.lastResult = { product, inventory };
+          // Evaluate replenishment within the same transaction.
+          const alert = await this._tryGenerateAlert(
+            inventory,
+            { transaction }
+          );
 
-      await this._tryGenerateAlert(inventory);
+          return { product, inventory, alert };
+        }
+      );
 
+      // Only report success after the transaction commits.
+      this.lastResult = {
+        product: result.product,
+        inventory: result.inventory,
+      };
+
+      this.lastAlert = result.alert;
       return true;
     } catch (error) {
-      // Clean up the new product if inventory creation failed.
-      if (
-        product &&
-        !product.isNewRecord &&
-        (!inventory || inventory.isNewRecord)
-      ) {
-        try {
-          await product.destroy();
-        } catch (cleanupError) {
-          this.lastWarning = `Cleanup failed: ${cleanupError.message}`;
-        }
-      }
-
+      // Sequelize has already rolled back the transaction.
       this.lastError = error.message;
       return false;
     }
   }
 
-  // 4. Retrieve the product selected by the user.
-  async retrieveSelectedProduct() {
+  // 4. Retrieve the selected product.
+  async retrieveSelectedProduct(options = {}) {
     if (!this.selectedProductId) {
       throw new Error("Select a product first.");
     }
 
     return Product.findByPk(this.selectedProductId, {
-      include: [{ model: InventoryRecord, as: "inventoryRecord" }],
+      include: [
+        {
+          model: InventoryRecord,
+          as: "inventoryRecord",
+        },
+      ],
+      ...options,
     });
   }
 
-  // 5. Update an existing product and inventory record.
+  // 5. Update product and inventory information atomically.
   async submitUpdates(data) {
     this.selectedTask = "UPDATE";
     this.pendingData = data;
-    this.lastError = this.lastWarning = this.lastResult = this.lastAlert = null;
+
+    this.lastError = null;
+    this.lastWarning = null;
+    this.lastResult = null;
+    this.lastAlert = null;
 
     if (!this.validateSubmittedData()) return false;
 
     const details = parseData(data);
 
     try {
-      const product = await this.retrieveSelectedProduct();
+      const result = await sequelize.transaction(
+        async (transaction) => {
+          const product = await this.retrieveSelectedProduct({
+            transaction,
+          });
 
-      if (!product || !product.inventoryRecord) {
-        throw new Error("Product or inventory record was not found.");
-      }
+          if (!product || !product.inventoryRecord) {
+            throw new Error(
+              "Product or inventory record was not found."
+            );
+          }
 
-      const inventory = product.inventoryRecord;
+          const inventory = product.inventoryRecord;
 
-      if (
-        hasOwn(details, "inventoryId") &&
-        details.inventoryId !== inventory.inventoryId
-      ) {
-        throw new Error("Inventory ID cannot be changed.");
-      }
+          if (
+            hasOwn(details, "inventoryId") &&
+            details.inventoryId !== inventory.inventoryId
+          ) {
+            throw new Error("Inventory ID cannot be changed.");
+          }
 
-      if (!product.validateProductInformation(data)) {
-        throw new Error("Invalid product information.");
-      }
+          if (!product.validateProductInformation(data)) {
+            throw new Error("Invalid product information.");
+          }
 
-      if (PRODUCT_FIELDS.some(field => hasOwn(details, field))) {
-        await product.updateProductInformation(data);
-      }
+          // Update the product when product fields were supplied.
+          if (
+            PRODUCT_FIELDS.some((field) => hasOwn(details, field))
+          ) {
+            await product.updateProductInformation(data, {
+              transaction,
+            });
+          }
 
-      if (INVENTORY_FIELDS.some(field => hasOwn(details, field))) {
-        await inventory.updateInventoryInformation(data);
-      }
+          // Update inventory when inventory fields were supplied.
+          if (
+            INVENTORY_FIELDS.some((field) => hasOwn(details, field))
+          ) {
+            await inventory.updateInventoryInformation(data, {
+              transaction,
+            });
+          }
 
-      this.lastResult = { product, inventory };
+          // Update the restock alert inside the same transaction.
+          const alert = await this._tryGenerateAlert(
+            inventory,
+            { transaction }
+          );
 
-      await this._tryGenerateAlert(inventory);
+          return { product, inventory, alert };
+        }
+      );
 
+      this.lastResult = {
+        product: result.product,
+        inventory: result.inventory,
+      };
+
+      this.lastAlert = result.alert;
       return true;
     } catch (error) {
       this.lastError = error.message;
@@ -196,16 +290,20 @@ class InventoryController {
     }
   }
 
-  // 6. Validate the information before it is saved.
+  // 6. Validate the information before saving.
   validateSubmittedData() {
     const details = parseData(this.pendingData);
 
     if (!details) {
-      this.lastError = "Provide a valid JSON object as a string.";
+      this.lastError =
+        "Provide a valid JSON object as a string.";
       return false;
     }
 
-    if (this.selectedTask !== "NEW" && this.selectedTask !== "UPDATE") {
+    if (
+      this.selectedTask !== "NEW" &&
+      this.selectedTask !== "UPDATE"
+    ) {
       this.lastError = "Select NEW or UPDATE as the task.";
       return false;
     }
@@ -219,11 +317,15 @@ class InventoryController {
       });
 
       if (!sample.validateProductInformation(this.pendingData)) {
-        this.lastError = "A valid product ID and name are required.";
+        this.lastError =
+          "A valid product ID and name are required.";
         return false;
       }
 
-      if (typeof details.inventoryId !== "string" || !details.inventoryId.trim()) {
+      if (
+        typeof details.inventoryId !== "string" ||
+        !details.inventoryId.trim()
+      ) {
         this.lastError = "Inventory ID is required.";
         return false;
       }
@@ -234,7 +336,8 @@ class InventoryController {
       }
     } else {
       if (!this.selectedProductId) {
-        this.lastError = "Select a product before updating it.";
+        this.lastError =
+          "Select a product before updating it.";
         return false;
       }
 
@@ -247,38 +350,53 @@ class InventoryController {
       }
 
       if (
-        ![...PRODUCT_FIELDS, ...INVENTORY_FIELDS]
-          .some(field => hasOwn(details, field))
+        ![...PRODUCT_FIELDS, ...INVENTORY_FIELDS].some(
+          (field) => hasOwn(details, field)
+        )
       ) {
-        this.lastError = "Provide at least one product or inventory change.";
+        this.lastError =
+          "Provide at least one product or inventory change.";
         return false;
       }
 
       if (
         hasOwn(details, "productName") &&
-        (typeof details.productName !== "string" ||
-          !details.productName.trim())
+        (
+          typeof details.productName !== "string" ||
+          !details.productName.trim()
+        )
       ) {
         this.lastError = "Product name cannot be blank.";
         return false;
       }
     }
 
+    // Validate quantities and reorder levels.
     for (const field of ["quantityOnHand", "reorderLevel"]) {
       if (
         hasOwn(details, field) &&
-        (!Number.isSafeInteger(details[field]) || details[field] < 0)
+        (
+          !Number.isSafeInteger(details[field]) ||
+          details[field] < 0
+        )
       ) {
-        this.lastError = `${field} must be a non-negative integer.`;
+        this.lastError =
+          `${field} must be a non-negative integer.`;
         return false;
       }
     }
 
-    if (hasOwn(details, "expiryDate") && !validDate(details.expiryDate)) {
-      this.lastError = "Expiry date must be a valid YYYY-MM-DD date or null.";
+    // Validate expiry date.
+    if (
+      hasOwn(details, "expiryDate") &&
+      !validDate(details.expiryDate)
+    ) {
+      this.lastError =
+        "Expiry date must be a valid YYYY-MM-DD date or null.";
       return false;
     }
 
+    // Validate optional product information.
     for (const field of ["description", "category"]) {
       if (
         hasOwn(details, field) &&
@@ -293,10 +411,13 @@ class InventoryController {
     if (
       hasOwn(details, "supplierId") &&
       details.supplierId !== null &&
-      (typeof details.supplierId !== "string" ||
-        !details.supplierId.trim())
+      (
+        typeof details.supplierId !== "string" ||
+        !details.supplierId.trim()
+      )
     ) {
-      this.lastError = "Supplier ID must be a non-empty string or null.";
+      this.lastError =
+        "Supplier ID must be a non-empty string or null.";
       return false;
     }
 
@@ -304,72 +425,86 @@ class InventoryController {
     return true;
   }
 
-  // 7. Validate information after the user makes corrections.
+  // 7. Validate corrected information.
   revalidateCorrectedData() {
     return this.validateSubmittedData();
   }
 
-  // Internal helper: generate or resolve replenishment alerts.
-  async _tryGenerateAlert(inventory) {
-    try {
-      const product = await Product.findByPk(inventory.productId, {
-        include: [{ model: Supplier, as: "supplier" }],
-      });
+  // Internal helper: update restock alerts in the same transaction.
+  async _tryGenerateAlert(inventory, { transaction } = {}) {
+    const product = await Product.findByPk(inventory.productId, {
+      include: [
+        { model: Supplier, as: "supplier" },
+      ],
+      transaction,
+    });
 
-      const stockStatus = inventory.evaluateInventoryStatus();
-      const expiryStatus = inventory.evaluateExpiryConditions();
-
-      const daysLeft = inventory.expiryDate
-        ? daysBetween(today(), inventory.expiryDate)
-        : null;
-
-      const leadTime = product?.supplier?.leadTimeDays;
-      const hasLeadTime = Number.isSafeInteger(leadTime) && leadTime >= 0;
-
-      const expiryRisk =
-        expiryStatus === "EXPIRED" ||
-        expiryStatus === "NEAR_EXPIRY" ||
-        (daysLeft !== null && hasLeadTime && daysLeft <= leadTime);
-
-      // Resolve pending alerts when replenishment is no longer needed.
-      if (stockStatus === "IN_STOCK" && !expiryRisk) {
-        await RestockAlert.update(
-          { alertStatus: "RESOLVED" },
-          {
-            where: {
-              inventoryId: inventory.inventoryId,
-              alertStatus: "PENDING",
-            },
-          }
-        );
-        return;
-      }
-
-      // Reuse an existing pending alert rather than creating duplicates.
-      const existing = await RestockAlert.findOne({
-        where: {
-          inventoryId: inventory.inventoryId,
-          alertStatus: "PENDING",
-        },
-      });
-
-      if (existing) {
-        this.lastAlert = existing;
-        return;
-      }
-
-      const alert = RestockAlert.build({
-        alertId: generateId("ALERT"),
-        inventoryId: inventory.inventoryId,
-      });
-
-      await alert.generateRestockAlert();
-
-      this.lastAlert = alert;
-    } catch (error) {
-      this.lastWarning =
-        `Inventory saved, but the restock alert failed: ${error.message}`;
+    if (!product) {
+      throw new Error(
+        "Product not found while evaluating restock alert."
+      );
     }
+
+    const stockStatus = inventory.evaluateInventoryStatus();
+    const expiryStatus = inventory.evaluateExpiryConditions();
+
+    const daysLeft = inventory.expiryDate
+      ? daysBetween(today(), inventory.expiryDate)
+      : null;
+
+    const leadTime = product.supplier?.leadTimeDays;
+
+    const hasLeadTime =
+      Number.isSafeInteger(leadTime) &&
+      leadTime >= 0;
+
+    const expiryRisk =
+      expiryStatus === "EXPIRED" ||
+      expiryStatus === "NEAR_EXPIRY" ||
+      (
+        daysLeft !== null &&
+        hasLeadTime &&
+        daysLeft <= leadTime
+      );
+
+    // Resolve pending alerts when stock is healthy.
+    if (stockStatus === "IN_STOCK" && !expiryRisk) {
+      await RestockAlert.update(
+        { alertStatus: "RESOLVED" },
+        {
+          where: {
+            inventoryId: inventory.inventoryId,
+            alertStatus: "PENDING",
+          },
+          transaction,
+        }
+      );
+
+      return null;
+    }
+
+    // Reuse an existing pending alert.
+    const existing = await RestockAlert.findOne({
+      where: {
+        inventoryId: inventory.inventoryId,
+        alertStatus: "PENDING",
+      },
+      transaction,
+    });
+
+    if (existing) {
+      return existing;
+    }
+
+    // Generate the new alert inside the transaction.
+    const alert = RestockAlert.build({
+      alertId: generateId("ALERT"),
+      inventoryId: inventory.inventoryId,
+    });
+
+    await alert.generateRestockAlert({ transaction });
+
+    return alert;
   }
 }
 
