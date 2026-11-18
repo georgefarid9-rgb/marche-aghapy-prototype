@@ -148,8 +148,9 @@ async function seedDatabase() {
       partnerId: "BP-002",
     });
 
-    // Two deliveries from SUP-001, recorded by the stock clerk (EMP-002):
-    // one complete and on time, one late and short.
+    // Three deliveries from SUP-001, recorded by the stock clerk (EMP-002):
+    // one complete and on time, one late and short, and one unplanned
+    // delivery with no purchase order (alternate flow 6b).
     await PerformanceRecord.bulkCreate(
       [
         {
@@ -169,6 +170,15 @@ async function seedDatabase() {
           quantityOrdered: 50,
           quantityReceived: 45,
           conditionRating: "Acceptable",
+          supplierId: "SUP-001",
+          employeeId: "EMP-002",
+        },
+        {
+          recordId: "PERF-003",
+          deliveryDate: "2026-10-20",
+          quantityReceived: 12,
+          conditionRating: "Good",
+          isUnplanned: true,
           supplierId: "SUP-001",
           employeeId: "EMP-002",
         },

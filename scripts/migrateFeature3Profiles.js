@@ -10,8 +10,8 @@ const {
   Supplier,
 } = require("../src/models");
 
-// Feature 3 migration for a database created BEFORE Feature 3 existed.
-// It keeps all existing data. Safe to run more than once.
+// Feature 3 migration for a database created before Feature 3, or before its
+// prototype-2 changes. It keeps all existing data. Safe to run more than once.
 //
 //   1. Backs up the database (VACUUM INTO database/marche-aghapy-before-feature3-<time>.sqlite)
 //   2. Creates the new tables if missing: business_partners, customers, performance_records
@@ -19,6 +19,10 @@ const {
 //      (+ a unique index on partnerId)
 //   4. Gives every existing supplier without a profile a BusinessPartner
 //      (partnerId "BP-<supplierId>", name copied from supplierName)
+//   5. Upgrades performance_records for unplanned deliveries (alternate flow 6b):
+//      adds isUnplanned and makes quantityOrdered and expectedDeliveryDate optional.
+//      SQLite cannot relax NOT NULL in place, so the table is rebuilt and every
+//      row is copied over inside one transaction.
 //
 // Do NOT use this on a brand-new database: use npm run db:setup instead.
 
@@ -120,6 +124,62 @@ async function migrateFeature3Profiles() {
     });
     if (unlinked.length === 0) {
       console.log("Every supplier already has a BusinessPartner profile.");
+    }
+
+    // 5. Unplanned deliveries in performance_records.
+    const recordColumns = await queryInterface.describeTable("performance_records");
+    const needsRebuild =
+      !recordColumns.isUnplanned ||
+      recordColumns.quantityOrdered.allowNull === false ||
+      recordColumns.expectedDeliveryDate.allowNull === false;
+
+    if (!needsRebuild) {
+      console.log("Table performance_records already supports unplanned deliveries.");
+    } else {
+      const copied = [
+        "recordId",
+        "deliveryDate",
+        "expectedDeliveryDate",
+        "quantityOrdered",
+        "quantityReceived",
+        "conditionRating",
+        "supplierId",
+        "employeeId",
+      ];
+      const isUnplannedSource = recordColumns.isUnplanned ? "isUnplanned" : "0";
+
+      await sequelize.query("PRAGMA foreign_keys = OFF");
+      try {
+        await sequelize.transaction(async (transaction) => {
+          await sequelize.query(
+            "ALTER TABLE performance_records RENAME TO performance_records_before_6b",
+            { transaction }
+          );
+          await PerformanceRecord.sync({ transaction });
+          await sequelize.query(
+            `INSERT INTO performance_records (${copied.join(", ")}, isUnplanned) ` +
+              `SELECT ${copied.join(", ")}, ${isUnplannedSource} FROM performance_records_before_6b`,
+            { transaction }
+          );
+          const [[before]] = await sequelize.query(
+            "SELECT COUNT(*) AS n FROM performance_records_before_6b",
+            { transaction }
+          );
+          const [[after]] = await sequelize.query(
+            "SELECT COUNT(*) AS n FROM performance_records",
+            { transaction }
+          );
+          if (before.n !== after.n) {
+            throw new Error(`Copied ${after.n} of ${before.n} performance records; rolled back.`);
+          }
+          await sequelize.query("DROP TABLE performance_records_before_6b", { transaction });
+          console.log(
+            `Table performance_records rebuilt for unplanned deliveries (${after.n} record(s) kept).`
+          );
+        });
+      } finally {
+        await sequelize.query("PRAGMA foreign_keys = ON");
+      }
     }
 
     console.log("Feature 3 migration completed successfully.");

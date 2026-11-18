@@ -43,6 +43,50 @@ class StoreOwner extends Model {
 
     return shifts;
   }
+
+  // ----- Feature 3 (Supplier & Customer Profile Management) -----
+
+  // Tell the owner that a delivery has a discrepancy (alternate flow 6a):
+  // short, over, damaged or expired. Returns the notification.
+  async notifyDiscrepancy(recordId) {
+    const record = await sequelize.models.PerformanceRecord.findByPk(recordId);
+    if (!record) {
+      throw new Error(`Performance record ${recordId} does not exist.`);
+    }
+    if (!record.flagDiscrepancy()) {
+      throw new Error(`Performance record ${recordId} has no discrepancy to report.`);
+    }
+    return {
+      ownerId: this.ownerId,
+      recordId,
+      supplierId: record.supplierId,
+      type: "Discrepancy",
+      message:
+        `Delivery ${recordId} from supplier ${record.supplierId}: received ` +
+        `${record.quantityReceived} of ${record.quantityOrdered ?? "-"}, condition ${record.conditionRating}.`,
+    };
+  }
+
+  // Tell the owner that a delivery arrived without a purchase order
+  // (alternate flow 6b). Returns the notification.
+  async notifyUnplannedDelivery(recordId) {
+    const record = await sequelize.models.PerformanceRecord.findByPk(recordId);
+    if (!record) {
+      throw new Error(`Performance record ${recordId} does not exist.`);
+    }
+    if (!record.isUnplanned) {
+      throw new Error(`Performance record ${recordId} is not an unplanned delivery.`);
+    }
+    return {
+      ownerId: this.ownerId,
+      recordId,
+      supplierId: record.supplierId,
+      type: "Unplanned delivery",
+      message:
+        `Delivery ${recordId} from supplier ${record.supplierId} had no purchase order: ` +
+        `${record.quantityReceived} received, condition ${record.conditionRating}.`,
+    };
+  }
 }
 
 StoreOwner.init(

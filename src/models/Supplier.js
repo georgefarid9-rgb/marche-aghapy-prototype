@@ -6,16 +6,41 @@ const sequelize = require("../database");
 // accumulates PerformanceRecords).
 
 class Supplier extends Model {
-  // Feature 3: score the supplier from its delivery history.
-  // Returns the average fill rate (0-100) across all performance records,
-  // or null if the supplier has no records yet.
+  // Feature 3: score the supplier from its delivery history (method contract
+  // C3-01, method specification MS3-01). Returns the average fill rate (0-100)
+  // of its PLANNED deliveries, or null when it has none (alternate flow 9a).
+  // Unplanned deliveries (flow 6b) have no quantity ordered, so they are left out.
   async evaluatePerformance() {
     const records = await this.getPerformanceRecords();
-    if (records.length === 0) {
+    const plannedRecords = records.filter((record) => !record.isUnplanned);
+    if (plannedRecords.length === 0) {
       return null;
     }
-    const total = records.reduce((sum, r) => sum + r.calculateFillRate(), 0);
-    return Math.round((total / records.length) * 10) / 10;
+    const total = plannedRecords.reduce((sum, record) => sum + record.calculateFillRate(), 0);
+    return Math.round((total / plannedRecords.length) * 10) / 10;
+  }
+
+  // The supplier's lead time in days (use case 3 step 9: average lead time).
+  getSupplierLeadTime() {
+    return this.leadTimeDays ?? null;
+  }
+
+  // Find the supplier whose profile has this name (class-scope operation,
+  // used by alternate flow 5a). Returns the Supplier, or null.
+  static async findProfile(partnerName) {
+    if (partnerName === undefined || partnerName === null || String(partnerName).trim() === "") {
+      return null;
+    }
+    const partner = await sequelize.models.BusinessPartner.findOne({
+      where: { partnerName: String(partnerName).trim(), partnerType: "Supplier" },
+    });
+    return partner ? partner.getSupplierProfile() : null;
+  }
+
+  // Inherited from BusinessPartner: the supplier's profile as readable text.
+  async retrieveInfo() {
+    const partner = await this.getPartner();
+    return partner ? partner.retrieveInfo() : null;
   }
 }
 
