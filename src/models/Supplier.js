@@ -5,22 +5,91 @@ const sequelize = require("../database");
 // extended by Feature 3 (Supplier is a kind of BusinessPartner and
 // accumulates PerformanceRecords).
 
+// The supplier's planned deliveries. Unplanned deliveries (alternate flow 6b)
+// have no quantity ordered or expected date, so they are left out of the metrics.
+async function plannedDeliveriesOf(supplier) {
+  const records = await supplier.getPerformanceRecords();
+  return records.filter((record) => !record.isUnplanned);
+}
+
+// Round to one decimal place.
+function round1(value) {
+  return Math.round(value * 10) / 10;
+}
+
 class Supplier extends Model {
   // Feature 3: score the supplier from its delivery history (method contract
   // C3-01, method specification MS3-01). Returns the average fill rate (0-100)
   // of its PLANNED deliveries, or null when it has none (alternate flow 9a).
   // Unplanned deliveries (flow 6b) have no quantity ordered, so they are left out.
   async evaluatePerformance() {
-    const records = await this.getPerformanceRecords();
-    const plannedRecords = records.filter((record) => !record.isUnplanned);
+    const plannedRecords = await plannedDeliveriesOf(this);
     if (plannedRecords.length === 0) {
       return null;
     }
     const total = plannedRecords.reduce((sum, record) => sum + record.calculateFillRate(), 0);
-    return Math.round((total / plannedRecords.length) * 10) / 10;
+    return round1(total / plannedRecords.length);
   }
 
-  // The supplier's lead time in days (use case 3 step 9: average lead time).
+  // Use case 3 step 9: the share (0-100) of planned deliveries that arrived on
+  // or before their expected delivery date. Null when there are none (9a).
+  async calculateOnTimeDeliveryRate() {
+    const plannedRecords = await plannedDeliveriesOf(this);
+    if (plannedRecords.length === 0) {
+      return null;
+    }
+    const onTime = plannedRecords.filter((record) => record.calculateDeliveryDelay() <= 0);
+    return round1((onTime.length / plannedRecords.length) * 100);
+  }
+
+  // Use case 3 step 9: the supplier's average ACTUAL lead time in days.
+  // The expected delivery date of an order is its order date plus the agreed
+  // lead time (leadTimeDays), so each delivery's actual lead time is
+  // leadTimeDays + its delivery delay (negative when early).
+  // Null when the lead time is unknown or there are no planned deliveries (9a).
+  async calculateAverageLeadTime() {
+    if (this.leadTimeDays === null || this.leadTimeDays === undefined) {
+      return null;
+    }
+    const plannedRecords = await plannedDeliveriesOf(this);
+    if (plannedRecords.length === 0) {
+      return null;
+    }
+    const total = plannedRecords.reduce(
+      (sum, record) => sum + this.leadTimeDays + record.calculateDeliveryDelay(),
+      0
+    );
+    return round1(total / plannedRecords.length);
+  }
+
+  // Use case 3 steps 8-9: the supplier performance report the owner reviews
+  // before ordering. Average lead time, on-time delivery rate and average fill
+  // rate, or a "no deliveries" message (alternate flow 9a).
+  async getPerformanceReport() {
+    const records = await this.getPerformanceRecords();
+    const plannedCount = records.filter((record) => !record.isUnplanned).length;
+    const report = {
+      supplierId: this.supplierId,
+      supplierName: this.supplierName,
+      deliveriesRecorded: records.length,
+      unplannedDeliveries: records.length - plannedCount,
+      agreedLeadTimeDays: this.getSupplierLeadTime(),
+      averageLeadTime: await this.calculateAverageLeadTime(),
+      onTimeDeliveryRate: await this.calculateOnTimeDeliveryRate(),
+      averageFillRate: await this.evaluatePerformance(),
+      message: null,
+    };
+    if (records.length === 0) {
+      report.message = "No deliveries were recorded for this supplier.";
+    } else if (plannedCount === 0) {
+      report.message =
+        "Only unplanned deliveries were recorded for this supplier, so no performance metrics can be calculated.";
+    }
+    return report;
+  }
+
+  // The lead time agreed with the supplier, in days (Supplier.leadTimeDays).
+  // calculateAverageLeadTime() gives the lead time actually observed.
   getSupplierLeadTime() {
     return this.leadTimeDays ?? null;
   }

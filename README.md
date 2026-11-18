@@ -38,11 +38,11 @@ Our system includes six main features.
 ### Feature 3 — Supplier and Customer Profiles
 
 - Store supplier and customer information.
-- Validate profile details before saving, and prevent duplicate supplier names and customer phone numbers.
-- Find and update business partner profiles.
+- Validate profile details before saving, and prevent duplicate supplier names and customer phone numbers (also enforced by the database).
+- Find and update business partner profiles: name, status, and supplier or customer contact details, lead time and payment terms.
 - Record supplier delivery performance, including unplanned deliveries without a purchase order.
-- Flag delivery discrepancies and notify the store owner.
-- Evaluate supplier delivery accuracy.
+- Flag delivery discrepancies and unplanned deliveries, and store a notification in the store owner's inbox.
+- Supplier performance report: average lead time, on-time delivery rate and average fill rate.
 - Retrieve customer purchase history.
 
 To check Feature 3, run `npm run profiles:check` on a newly seeded database. To upgrade an existing database without losing data, run `npm run profiles:migrate` (it backs up the database first).

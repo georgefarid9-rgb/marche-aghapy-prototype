@@ -85,6 +85,15 @@ Customer.init(
     modelName: "Customer",
     tableName: "customers",
     timestamps: false,
+    // 5a enforced by the database too: one customer profile per phone number.
+    // (SQLite allows several customers with no phone number.)
+    indexes: [
+      {
+        name: "customers_unique_phone_number",
+        unique: true,
+        fields: ["phoneNumber"],
+      },
+    ],
     hooks: {
       // The linked partner must exist and be a Customer.
       async beforeValidate(customer, options) {
