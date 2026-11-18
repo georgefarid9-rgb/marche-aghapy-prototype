@@ -13,7 +13,8 @@
     "reports:check": "node scripts/verifyReports.js",
     "profiles:migrate": "node scripts/migrateFeature3Profiles.js",
     "support:check": "node scripts/verifyCustomerSupport.js",
-    "support:migrate": "node scripts/migrateFeature6Support.js"
+    "support:migrate": "node scripts/migrateFeature6Support.js",
+    "support:migrate-refunds": "node scripts/migrateFeature6Refunds.js"
   },
   "repository": {
     "type": "git",

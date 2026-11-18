@@ -11,6 +11,9 @@ const {
   ComplaintCase,
   SupportRequest,
   ReturnRequest,
+  Ledger,
+  Transaction,
+  InventoryRecord,
 } = require("../src/models");
 
 // Feature 6 verification. Needs the sample data from `npm run db:seed`, including the
@@ -24,10 +27,12 @@ const OTHER_CUSTOMER_ID = "CUST-VERIFY-2";
 const CASE_IDS = ["CASE-VERIFY-1", "CASE-VERIFY-2"];
 const RETURN_IDS = [
   "RET-VERIFY-1", "RET-VERIFY-2", "RET-VERIFY-3", "RET-VERIFY-4",
-  "RET-VERIFY-5", "RET-VERIFY-6", "RET-VERIFY-7", "RET-VERIFY-8", "RET-VERIFY-9",
+  "RET-VERIFY-5", "RET-VERIFY-6", "RET-VERIFY-7", "RET-VERIFY-8", "RET-VERIFY-9", "RET-VERIFY-RB",
 ];
 const REQUEST_IDS = ["REQ-VERIFY-1"];
-const SALE_IDS = ["SALE-VERIFY-OLD", "SALE-VERIFY-FUTURE", "SALE-VERIFY-CONC", "SALE-VERIFY-WALKIN"];
+const SALE_IDS = ["SALE-VERIFY-OLD", "SALE-VERIFY-FUTURE", "SALE-VERIFY-CONC", "SALE-VERIFY-WALKIN", "SALE-VERIFY-LINE", "SALE-VERIFY-RB"];
+const createdRequestIds = [];
+let tempLedgerId = null;
 
 let failures = 0;
 
@@ -53,7 +58,16 @@ async function checkThrows(action, text, message) {
 
 // Delete everything this script creates. Children are deleted before parents.
 async function removeVerifyData() {
-  await ReturnRequest.destroy({ where: { returnId: RETURN_IDS } });
+  // Refund entries posted to the ledger, then the returns that caused them.
+  const { Op } = require("sequelize");
+  const returns = await ReturnRequest.findAll({
+    where: { [Op.or]: [{ returnId: [...RETURN_IDS, "RET-001"] }, { saleId: SALE_IDS }] },
+    attributes: ["returnId"],
+  });
+  await Transaction.destroy({ where: { transactionId: returns.map((r) => `REF-${r.returnId}`) } });
+  await ReturnRequest.destroy({ where: { returnId: returns.map((r) => r.returnId).filter((id) => id !== "RET-001") } });
+  await Employee.destroy({ where: { employeeId: "EMP-VERIFY-NL" } });
+  await SupportRequest.destroy({ where: { requestId: createdRequestIds } });
   await ComplaintCase.destroy({ where: { caseId: CASE_IDS } });
   await SupportRequest.destroy({ where: { requestId: REQUEST_IDS } });
   await SaleItem.destroy({ where: { saleId: SALE_IDS } });
@@ -66,6 +80,7 @@ async function verifyCustomerSupport() {
   let sampleSale = null;
   let sampleItemIds = [];
   let originalTotal = null;
+  let ledger = null;
 
   try {
     await sequelize.authenticate();
@@ -85,6 +100,15 @@ async function verifyCustomerSupport() {
     originalTotal = sampleSale.totalAmount;
     sampleItemIds = (await SaleItem.findAll({ where: { saleId: "SALE-001" } })).map((i) => i.saleItemId);
     await removeVerifyData(); // leftovers from an interrupted earlier run
+
+    // Refunds are posted to the store's ledger (Feature 4). Use the store's ledger, or make
+    // a temporary one that is deleted at the end.
+    ledger = await Ledger.findOne({ where: { storeId: "STORE-001" } });
+    if (!ledger) {
+      tempLedgerId = "LEDGER-VERIFY-F6";
+      await Ledger.destroy({ where: { ledgerId: tempLedgerId } });
+      ledger = await Ledger.create({ ledgerId: tempLedgerId, periodStartDate: today(), storeId: "STORE-001" });
+    }
     await ReturnRequest.update({ status: "Pending" }, { where: { returnId: "RET-001" } });
 
     // ---- Feature 3 integration: a real Customer record ----
@@ -128,8 +152,7 @@ async function verifyCustomerSupport() {
     check(escalated.status === "Pending Owner Review", "case is saved as Pending Owner Review");
     check(escalated.ownerId === "OWN-001", "case is assigned to the store owner");
     owner.reviewComplaint(escalated);
-    owner.resolveCase(escalated);
-    await escalated.save();
+    await owner.resolveCase(escalated);
     check((await ComplaintCase.findByPk("CASE-VERIFY-1")).status === "Resolved", "owner resolves the case and it is saved as Resolved");
     await checkThrows(() => escalated.escalateToOwner(), "already Resolved", "a resolved case cannot be escalated again");
     await checkThrows(() => complaint.setStatus("Banana"), "status must be one of", "setStatus() rejects an invalid status");
@@ -210,6 +233,73 @@ async function verifyCustomerSupport() {
     check(refundedTotal <= 10, `total refunded on the sale (${refundedTotal.toFixed(2)}) does not exceed its total (10.00)`);
     check(refundedTotal === 6, "exactly one of the two refunds was paid");
 
+    // ---- New Feature 6 methods ----
+    console.log("\nEmployee.reviewIssue() / escalateComplaint()");
+    check((await employee.reviewIssue("CASE-001")).caseId === "CASE-001", "reviewIssue() returns the case");
+    await checkThrows(() => employee.reviewIssue("CASE-NOPE"), "was not found", "reviewIssue() refuses an unknown case");
+    const toEscalate = await employee.createComplaintCase(CUSTOMER_ID, { caseId: "CASE-VERIFY-2", category: "Service", description: "Long wait at the till." });
+    const escalatedCase = await employee.escalateComplaint("CASE-VERIFY-2");
+    check(escalatedCase.status === "Pending Owner Review" && escalatedCase.ownerId === "OWN-001", "escalateComplaint() sends the case to the owner");
+
+    console.log("\nStoreOwner.listPendingCases() / resolveCase()");
+    const pending = await owner.listPendingCases();
+    check(pending.some((c) => c.caseId === "CASE-VERIFY-2"), "listPendingCases() includes the escalated case");
+    check(pending.every((c) => c.status === "Pending Owner Review" && c.ownerId === "OWN-001"), "listPendingCases() holds only this owner's pending cases");
+    await owner.resolveCase(toEscalate);
+    check((await ComplaintCase.findByPk("CASE-VERIFY-2")).status === "Resolved", "resolveCase() saves Resolved");
+    check(!(await owner.listPendingCases()).some((c) => c.caseId === "CASE-VERIFY-2"), "a resolved case leaves the pending list");
+
+    console.log("\nEmployee.openSupportRequest() / flagMissingRecord() / addNotes()");
+    const opened = await employee.openSupportRequest(CUSTOMER_ID, "Opening hours", "Customer asked about holiday hours.");
+    createdRequestIds.push(opened.requestId);
+    check(opened.requestStatus === "Open" && opened.customerId === CUSTOMER_ID, "openSupportRequest() saves an Open request");
+    await checkThrows(() => employee.openSupportRequest("CUST-NOPE", "x", "y"), "was not found", "openSupportRequest() refuses an unknown customer");
+    const flag = await employee.flagMissingRecord("CUST-NOPE", "Customer says they have an account.");
+    createdRequestIds.push(flag.requestId);
+    check(flag.subject === "Missing record" && flag.customerId === null && flag.description.includes("CUST-NOPE"), "flagMissingRecord() saves a flag with no customer");
+    const flagKnown = await employee.flagMissingRecord(CUSTOMER_ID, "Purchase not in history.");
+    createdRequestIds.push(flagKnown.requestId);
+    check(flagKnown.customerId === CUSTOMER_ID, "flagMissingRecord() keeps the customer when it exists");
+    await checkThrows(() => employee.flagMissingRecord(CUSTOMER_ID, "  "), "note is required", "flagMissingRecord() needs a note");
+    check((await owner.listMissingRecordFlags()).some((r) => r.requestId === flag.requestId), "listMissingRecordFlags() lists the open flag");
+    const noted = await employee.addNotes(opened.requestId, "Told the customer 9am to 9pm.");
+    check(noted.description.includes("Note: Told the customer") && noted.requestStatus === "Logged", "Employee.addNotes() adds the note and logs the request");
+    await checkThrows(() => employee.addNotes("REQ-NOPE", "x"), "was not found", "Employee.addNotes() refuses an unknown request");
+
+    // ---- Return of part of a sale line: quantity, stock and ledger ----
+    console.log("\nEmployee.requestReturn(): partial return, items sold and ledger");
+    const lineSale = await Sale.create({ saleId: "SALE-VERIFY-LINE", saleDate: today(), totalAmount: 0, customerId: CUSTOMER_ID, employeeId: employee.employeeId });
+    const line = await lineSale.addItem({ productId: "PROD-001", quantity: 4, unitPrice: 3 });
+    const stockBefore = (await InventoryRecord.findOne({ where: { productId: "PROD-001" } })).quantityOnHand;
+    const balanceBefore = (await ledger.reload()).currentBalance;
+
+    check((await employee.requestReturn(CUSTOMER_ID, "SALE-VERIFY-LINE", line.saleItemId, 1)) === true, "returning 1 of 4 units is refunded");
+    const afterOne = await SaleItem.findByPk(line.saleItemId);
+    check(afterOne.returnedQuantity === 1 && afterOne.returnableQuantity === 3, "returnedQuantity is 1, returnable is 3");
+    check((await InventoryRecord.findOne({ where: { productId: "PROD-001" } })).quantityOnHand === stockBefore, "stock is NOT put back");
+    check((await ledger.reload()).currentBalance === balanceBefore - 3, "ledger balance fell by the refund (3.00)");
+    const refundTx = (await Transaction.findAll({ where: { ledgerId: ledger.ledgerId, category: "Refund" } })).filter((t) => t.transactionId.startsWith("REF-RET-"));
+    check(refundTx.length === 1 && refundTx[0].amount === 3, "one Refund entry of 3.00 was added to the ledger");
+
+    check((await employee.requestReturn(CUSTOMER_ID, "SALE-VERIFY-LINE", line.saleItemId, 3)) === true, "returning the other 3 units is refunded");
+    check((await employee.requestReturn(CUSTOMER_ID, "SALE-VERIFY-LINE", line.saleItemId, 1)) === false, "a 5th unit is rejected (only 4 were sold)");
+    check((await SaleItem.findByPk(line.saleItemId)).returnedQuantity === 4, "returnedQuantity stays 4");
+    await checkThrows(() => employee.requestReturn(CUSTOMER_ID, "SALE-001", line.saleItemId, 1), "was not found on sale", "a line from another sale is refused");
+    await checkThrows(() => line.recordReturn(0), "whole number", "recordReturn() refuses 0");
+
+    console.log("\nRefund failure rolls everything back");
+    const noLedgerEmp = await Employee.create({ employeeId: "EMP-VERIFY-NL", employeeName: "No Store", role: "Cashier" });
+    const rbReturn = await ReturnRequest.create({
+      returnId: "RET-VERIFY-RB", reason: "Verification", amount: 3, quantity: 1, saleItemId: line.saleItemId,
+      customerId: CUSTOMER_ID, saleId: "SALE-VERIFY-LINE", employeeId: noLedgerEmp.employeeId,
+    });
+    const sale2 = await Sale.create({ saleId: "SALE-VERIFY-RB", saleDate: today(), totalAmount: 0, customerId: CUSTOMER_ID, employeeId: employee.employeeId });
+    const line2 = await sale2.addItem({ productId: "PROD-001", quantity: 2, unitPrice: 5 });
+    await rbReturn.update({ saleId: "SALE-VERIFY-RB", saleItemId: line2.saleItemId, amount: 5 });
+    await checkThrows(() => rbReturn.processRefund(), "No ledger", "a refund with no ledger raises an error");
+    check((await ReturnRequest.findByPk("RET-VERIFY-RB")).status === "Pending", "the return stays Pending");
+    check((await SaleItem.findByPk(line2.saleItemId)).returnedQuantity === 0, "returnedQuantity was not changed");
+
     // ---- Shared sale methods ----
     console.log("\nSale.addItem(), removeItem(), recalculateTotal()");
     const before = (await Sale.findByPk("SALE-001")).totalAmount;
@@ -240,6 +330,13 @@ async function verifyCustomerSupport() {
     // Always leave the sample data as it was found.
     try {
       await removeVerifyData();
+      if (ledger) {
+        await ledger.reload();
+        await ledger.recalculateBalance();
+        if (tempLedgerId) {
+          await Ledger.destroy({ where: { ledgerId: tempLedgerId } });
+        }
+      }
       if (sampleSale) {
         await SaleItem.destroy({ where: { saleId: "SALE-001", saleItemId: { [require("sequelize").Op.notIn]: sampleItemIds } } });
         await Sale.update({ totalAmount: originalTotal }, { where: { saleId: "SALE-001" } });

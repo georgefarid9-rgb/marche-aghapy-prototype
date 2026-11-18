@@ -11,10 +11,27 @@ class StoreOwner extends Model {
     return complaint;
   }
 
-  // Close a complaint case as resolved.
-  resolveCase(complaint) {
-    complaint.status = "Resolved";
-    return complaint;
+  // Close a complaint case as resolved and save it.
+  async resolveCase(complaint) {
+    return complaint.setStatus("Resolved");
+  }
+
+  // Cases escalated to this owner that are waiting for review, oldest first.
+  async listPendingCases() {
+    const { ComplaintCase } = require("./index");
+    return ComplaintCase.findAll({
+      where: { status: "Pending Owner Review", ownerId: this.ownerId },
+      order: [["dateCreated", "ASC"], ["caseId", "ASC"]],
+    });
+  }
+
+  // Open "Missing record" flags raised by employees, oldest first.
+  async listMissingRecordFlags() {
+    const { SupportRequest } = require("./index");
+    return SupportRequest.findAll({
+      where: { subject: "Missing record", requestStatus: "Open" },
+      order: [["requestDate", "ASC"], ["requestId", "ASC"]],
+    });
   }
 
   // ----- Shared with Feature 1 (Product & Inventory) -----

@@ -13,6 +13,9 @@ const RETURN_STATUSES = ["Pending", "Refunded", "Rejected"];
 // A sale can be returned for this many days after the sale date (prototype rule).
 const RETURN_WINDOW_DAYS = 30;
 
+// How a refund is stored in the Feature 4 ledger (see processRefund).
+const REFUND_TRANSACTION_TYPE = "Expense";
+
 // Work in whole cents so amounts such as 0.1 + 0.2 compare correctly.
 const toCents = (amount) => Math.round(amount * 100);
 
@@ -25,7 +28,8 @@ class ReturnRequest extends Model {
   //   4. the sale belongs to the same customer as the request,
   //   5. the sale date is not in the future,
   //   6. the sale is inside the return window,
-  //   7. the amount does not exceed what is still refundable on the sale
+  //   7. quantity (when given) does not exceed the units still returnable on the sale line,
+  //   8. the amount does not exceed what is still refundable on the sale
   //      (sale total minus refunds already paid out).
   // Pass { transaction } to run the reads inside a transaction.
   async getIneligibilityReason(options = {}) {
@@ -56,6 +60,17 @@ class ReturnRequest extends Model {
       return `sale ${sale.saleId} is outside the ${RETURN_WINDOW_DAYS}-day return window`;
     }
 
+    // When the return names a sale line and a quantity, that many units must still be returnable.
+    if (this.saleItemId && this.quantity) {
+      const item = await this.getSaleItem({ transaction });
+      if (!item || item.saleId !== this.saleId) {
+        return `sale item ${this.saleItemId} is not a line of sale ${this.saleId}`;
+      }
+      if (this.quantity > item.quantity - item.returnedQuantity) {
+        return `only ${item.quantity - item.returnedQuantity} unit(s) of sale item ${item.saleItemId} can still be returned`;
+      }
+    }
+
     const alreadyRefunded =
       (await ReturnRequest.sum("amount", {
         where: { saleId: this.saleId, status: "Refunded" },
@@ -82,10 +97,20 @@ class ReturnRequest extends Model {
   // before the eligibility reads, so two refunds on the same sale cannot both see the
   // same remaining amount and together exceed it.
   //
-  // This is a simulated refund: it only records the decision on this request. It does
-  // not yet post to Accounting or return stock to Inventory (see the README).
+  // When eligible, the refund is also recorded (no stock is returned):
+  //   - the sale line's returnedQuantity goes up (items sold goes down),
+  //   - a Feature 4 "Refund" entry is added to the store's ledger (revenue goes down).
+  // If anything fails, everything is undone and the request stays Pending.
+  //
+  // Prototype note: the refund entry is saved as an Expense with category "Refund" because
+  // Feature 4's Transaction only accepts "Revenue" or "Expense". The balance falls by the
+  // refund amount either way. Change REFUND_TRANSACTION_TYPE if Feature 4 adds "Refund".
+  // The ledger balance is recalculated after the commit, because Ledger.addTransaction()
+  // does not take a database transaction and would wait on the lock held here.
   async processRefund() {
-    return sequelize.transaction(
+    let ledger = null;
+
+    const eligible = await sequelize.transaction(
       { type: Transaction.TYPES.IMMEDIATE },
       async (transaction) => {
         // Re-read inside the transaction so a decision made elsewhere is not overwritten.
@@ -95,12 +120,49 @@ class ReturnRequest extends Model {
           throw new Error(`Return ${this.returnId} was already ${this.status}.`);
         }
 
-        const eligible = await this.checkEligibility({ transaction });
-        this.status = eligible ? "Refunded" : "Rejected";
+        const isEligible = await this.checkEligibility({ transaction });
+
+        if (isEligible) {
+          if (this.saleItemId && this.quantity) {
+            const item = await this.getSaleItem({ transaction });
+            await item.recordReturn(this.quantity, { transaction });
+          }
+
+          ledger = await this.findLedger({ transaction });
+          const refund = sequelize.models.Transaction.build({
+            transactionId: `REF-${this.returnId}`,
+            ledgerId: ledger.ledgerId,
+            transactionType: REFUND_TRANSACTION_TYPE,
+            category: "Refund",
+            amount: this.amount,
+            date: today(),
+            description: `Refund for return ${this.returnId} on sale ${this.saleId}`,
+          });
+          refund.validateTransaction();
+          await refund.save({ transaction });
+        }
+
+        this.status = isEligible ? "Refunded" : "Rejected";
         await this.save({ transaction });
-        return eligible;
+        return isEligible;
       }
     );
+
+    if (ledger) {
+      await ledger.recalculateBalance();
+    }
+    return eligible;
+  }
+
+  // The ledger of the store where the processing employee works (Feature 4).
+  async findLedger(options = {}) {
+    const employee = this.employeeId ? await this.getEmployee(options) : null;
+    const store = employee && employee.storeId ? await employee.getStore(options) : null;
+    const ledger = store ? await store.getLedger(options) : null;
+    if (!ledger) {
+      throw new Error(`No ledger was found for return ${this.returnId}, so the refund cannot be recorded.`);
+    }
+    return ledger;
   }
 }
 
@@ -130,7 +192,15 @@ ReturnRequest.init(
       validate: { isIn: [RETURN_STATUSES] },
     },
 
-    // customerId, saleId and employeeId are added by the associations in models/index.js.
+    // Which sale line is returned and how many units. Optional so a whole-amount
+    // return (such as RET-001) still works.
+    quantity: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      validate: { min: 1 },
+    },
+
+    // customerId, saleId, saleItemId and employeeId are added by the associations in models/index.js.
   },
   {
     sequelize,
@@ -153,5 +223,6 @@ ReturnRequest.init(
 
 ReturnRequest.RETURN_STATUSES = RETURN_STATUSES;
 ReturnRequest.RETURN_WINDOW_DAYS = RETURN_WINDOW_DAYS;
+ReturnRequest.REFUND_TRANSACTION_TYPE = REFUND_TRANSACTION_TYPE;
 
 module.exports = ReturnRequest;

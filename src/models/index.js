@@ -262,6 +262,17 @@ ReturnRequest.belongsTo(Sale, {
   as: "sale",
 });
 
+// SaleItem 1 ---- 0..* ReturnRequest (returned in)
+SaleItem.hasMany(ReturnRequest, {
+  foreignKey: "saleItemId",
+  as: "returnRequests",
+});
+
+ReturnRequest.belongsTo(SaleItem, {
+  foreignKey: { name: "saleItemId", allowNull: true },
+  as: "saleItem",
+});
+
 // Employee 1 ---- 0..* ReturnRequest (processes)
 Employee.hasMany(ReturnRequest, {
   foreignKey: "employeeId",
@@ -325,15 +336,16 @@ ComplaintCase.belongsTo(Customer, {
 });
 
 // Customer 1 ---- 0..* SupportRequest (submits)
+// customerId may be empty: "Missing record" flags are logged when the customer was not found.
 Customer.hasMany(SupportRequest, {
-  foreignKey: { name: "customerId", allowNull: false },
+  foreignKey: { name: "customerId", allowNull: true },
   as: "supportRequests",
   onDelete: "RESTRICT",
   onUpdate: "CASCADE",
 });
 
 SupportRequest.belongsTo(Customer, {
-  foreignKey: { name: "customerId", allowNull: false },
+  foreignKey: { name: "customerId", allowNull: true },
   as: "customer",
   onDelete: "RESTRICT",
   onUpdate: "CASCADE",
