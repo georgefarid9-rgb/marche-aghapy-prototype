@@ -7,7 +7,14 @@ const {
   Customer,
   PerformanceRecord,
   Employee,
+  StoreOwner,
+  Notification,
 } = require("../src/models");
+
+// Rows created only by this script, removed at the end.
+const TEST_NOTIFICATIONS = ["NTF-PERF-002-DISCREPANCY", "NTF-PERF-003-UNPLANNED"];
+const TEST_SUPPLIER = { partnerId: "BP-TEST-NILE", supplierId: "SUP-TEST-NILE" };
+const TEST_CUSTOMER_PARTNERS = ["BP-TEST-DUP-PHONE"];
 
 // Feature 3 verification. Every step is checked with an assertion.
 // Any failed check stops the script with exit code 1, so it cannot
@@ -39,9 +46,12 @@ async function verifyProfiles() {
   let customerPartner;
   let originalSupplierName;
   let originalCustomerName;
+  let originalSupplierFields;
+  let originalCustomerFields;
 
   try {
     await sequelize.authenticate();
+    await Notification.destroy({ where: { notificationId: TEST_NOTIFICATIONS } });
 
     // ----- 1. Seeded supplier, its profile and its deliveries -----
     console.log("\n1. Supplier profile and performance records");
@@ -66,8 +76,8 @@ async function verifyProfiles() {
     pass(`SUP-001 is linked to ${supplier.partnerId} (${supplier.partner.partnerName}), names match`);
 
     const records = supplier.performanceRecords;
-    assert.equal(records.length, 2, "Expected 2 seeded performance records.");
-    const [perf1, perf2] = records;
+    assert.equal(records.length, 3, "Expected 3 seeded performance records.");
+    const [perf1, perf2, perf3] = records;
 
     assert.equal(perf1.calculateFillRate(), 100);
     assert.equal(perf1.calculateDeliveryDelay(), 0);
@@ -83,7 +93,100 @@ async function verifyProfiles() {
     pass("PERF-002: fill rate 90%, 3 days late, discrepancy flagged, derived attributes match");
 
     assert.equal(await supplier.evaluatePerformance(), 95);
-    pass("evaluatePerformance() returns 95 (average of 100 and 90)");
+    pass("evaluatePerformance() returns 95: average of the planned deliveries (100 and 90), unplanned PERF-003 left out");
+
+    assert.equal(supplier.getSupplierLeadTime(), 7);
+    pass("getSupplierLeadTime() returns the agreed lead time: 7 days");
+
+    // Use case 3 step 9: the three report metrics.
+    assert.equal(await supplier.calculateOnTimeDeliveryRate(), 50);
+    pass("calculateOnTimeDeliveryRate() returns 50: PERF-001 on time, PERF-002 late");
+
+    assert.equal(await supplier.calculateAverageLeadTime(), 8.5);
+    pass("calculateAverageLeadTime() returns 8.5 days: (7 + 0) and (7 + 3 late) averaged");
+
+    const report = await supplier.getPerformanceReport();
+    assert.equal(report.deliveriesRecorded, 3);
+    assert.equal(report.unplannedDeliveries, 1);
+    assert.equal(report.averageLeadTime, 8.5);
+    assert.equal(report.onTimeDeliveryRate, 50);
+    assert.equal(report.averageFillRate, 95);
+    assert.equal(report.message, null);
+    pass("getPerformanceReport(): average lead time 8.5 days, on-time rate 50%, average fill rate 95% (step 9)");
+
+    // ----- 1b. Unplanned delivery (alternate flow 6b) -----
+    console.log("\n1b. Unplanned delivery");
+
+    assert.equal(perf3.recordId, "PERF-003");
+    assert.equal(perf3.isUnplanned, true);
+    assert.equal(perf3.quantityOrdered, null);
+    assert.equal(perf3.calculateFillRate(), 0);
+    assert.equal(perf3.calculateDeliveryDelay(), null);
+    assert.equal(perf3.flagDiscrepancy(), false);
+    pass("PERF-003 is unplanned: fill rate 0, no delay, no discrepancy in Good condition");
+
+    const poorUnplanned = PerformanceRecord.build({
+      recordId: "PERF-UNPLANNED-POOR",
+      deliveryDate: "2026-10-21",
+      quantityReceived: 5,
+      conditionRating: "Poor",
+      isUnplanned: true,
+      supplierId: "SUP-001",
+      employeeId: "EMP-002",
+    });
+    assert.equal(poorUnplanned.flagDiscrepancy(), true);
+    pass("an unplanned delivery in Poor condition is flagged");
+
+    await expectRejected(
+      () => PerformanceRecord.create({
+        recordId: "PERF-PLANNED-NO-ORDER",
+        deliveryDate: "2026-10-21",
+        quantityReceived: 5,
+        supplierId: "SUP-001",
+        employeeId: "EMP-002",
+      }),
+      "a planned delivery without quantityOrdered and expectedDeliveryDate"
+    );
+
+    // ----- 1c. StoreOwner notifications (6a, 6b) -----
+    console.log("\n1c. Store owner notifications");
+
+    const owner = await StoreOwner.findByPk("OWN-001");
+    assert.ok(owner, "OWN-001 not found.");
+    const discrepancyNotice = await owner.notifyDiscrepancy("PERF-002");
+    assert.equal(discrepancyNotice.notificationType, "Discrepancy");
+    assert.equal(discrepancyNotice.recordId, "PERF-002");
+    assert.equal(discrepancyNotice.ownerId, "OWN-001");
+    assert.equal(discrepancyNotice.status, "Unread");
+    pass(`notifyDiscrepancy("PERF-002") stored: ${discrepancyNotice.message}`);
+
+    const unplannedNotice = await owner.notifyUnplannedDelivery("PERF-003");
+    assert.equal(unplannedNotice.notificationType, "Unplanned delivery");
+    pass(`notifyUnplannedDelivery("PERF-003") stored: ${unplannedNotice.message}`);
+
+    const stored = await Notification.findByPk("NTF-PERF-002-DISCREPANCY");
+    assert.ok(stored, "the discrepancy notification should be saved in the database");
+    await owner.notifyDiscrepancy("PERF-002");
+    assert.equal(await Notification.count({ where: { recordId: "PERF-002" } }), 1);
+    pass("notifications are saved in the database; notifying twice does not create a duplicate");
+
+    const inbox = await owner.reviewNotifications();
+    assert.deepEqual(
+      inbox.map((n) => n.notificationId).sort(),
+      [...TEST_NOTIFICATIONS].sort()
+    );
+    await inbox[0].markAsRead();
+    assert.equal((await owner.reviewNotifications()).length, 1);
+    pass("reviewNotifications() shows the owner's 2 unread notifications; markAsRead() removes one from the inbox");
+
+    await expectRejected(
+      () => owner.notifyDiscrepancy("PERF-001"),
+      'notifyDiscrepancy("PERF-001"), a delivery with no discrepancy'
+    );
+    await expectRejected(
+      () => owner.notifyUnplannedDelivery("PERF-001"),
+      'notifyUnplannedDelivery("PERF-001"), a planned delivery'
+    );
 
     // ----- 2. Over-delivery -----
     console.log("\n2. Over-delivery");
@@ -184,29 +287,40 @@ async function verifyProfiles() {
       "Setting supplierName directly to a different name"
     );
 
+    // Put the original name back now, so the checks below see the seeded data.
+    await supplierPartner.reload();
+    await supplierPartner.updateProfile({ partnerName: originalSupplierName });
+
     // ----- 6. Customer profile -----
     console.log("\n6. Customer profile");
 
     const customer = await Customer.findByPk("CUST-001");
     assert.ok(customer, "CUST-001 not found.");
     const info = await customer.retrieveInfo();
-    assert.deepEqual(
-      {
-        customerId: info.customerId,
-        partnerId: info.partnerId,
-        name: info.name,
-        status: info.status,
-        email: info.email,
-      },
-      {
-        customerId: "CUST-001",
-        partnerId: "BP-002",
-        name: "Sample Customer",
-        status: "Active",
-        email: "customer1@example.com",
-      }
-    );
-    pass("retrieveInfo() returns the shared profile and the customer fields");
+    assert.equal(typeof info, "string", "retrieveInfo() should return a String");
+    for (const expected of [
+      "Partner ID: BP-002",
+      "Name: Sample Customer",
+      "Type: Customer",
+      "Status: Active",
+      "Customer ID: CUST-001",
+      "Email: customer1@example.com",
+    ]) {
+      assert.ok(info.includes(expected), `retrieveInfo() is missing "${expected}"`);
+    }
+    pass("Customer.retrieveInfo() returns the shared profile and the customer fields as a String");
+
+    const supplierInfo = await (await Supplier.findByPk("SUP-001")).retrieveInfo();
+    assert.ok(supplierInfo.includes("Type: Supplier"));
+    assert.ok(supplierInfo.includes("Supplier ID: SUP-001"));
+    assert.ok(supplierInfo.includes("Payment terms: Net 30"));
+    pass("Supplier.retrieveInfo() works too (moved up to BusinessPartner)");
+
+    assert.deepEqual(customer.contactEmployee("  Where is my order?  "), {
+      customerId: "CUST-001",
+      question: "Where is my order?",
+    });
+    await expectRejected(async () => customer.contactEmployee(""), "contactEmployee() without a question");
 
     const history = await customer.listPurchaseHistory();
     assert.ok(Array.isArray(history), "listPurchaseHistory() should return a list");
@@ -217,24 +331,173 @@ async function verifyProfiles() {
       pass("listPurchaseHistory() returns [] (Sale model not in the prototype yet)");
     }
 
+    // ----- 6b. findProfile() (alternate flows 2a, 5a) -----
+    console.log("\n6b. findProfile()");
+
+    assert.equal((await Customer.findProfile("514-555-0200")).customerId, "CUST-001");
+    assert.equal(await Customer.findProfile("000-000-0000"), null);
+    pass("Customer.findProfile(phoneNumber) finds CUST-001, returns null for an unknown number (2a)");
+
+    assert.equal((await Supplier.findProfile("Sample Supplier")).supplierId, "SUP-001");
+    assert.equal(await Supplier.findProfile("No Such Supplier"), null);
+    pass("Supplier.findProfile(partnerName) finds SUP-001, returns null for an unknown name");
+
+    // ----- 6c. validateProfile() (3a, 2S.3, 5a) -----
+    console.log("\n6c. validateProfile()");
+
+    const bp1 = await BusinessPartner.findByPk("BP-001");
+    const bp2 = await BusinessPartner.findByPk("BP-002");
+    const newSupplier = BusinessPartner.build({ partnerType: "Supplier" });
+    const newCustomer = BusinessPartner.build({ partnerType: "Customer" });
+
+    const cases = [
+      [newSupplier, { partnerName: "Nile Foods", leadTimeDays: 14 }, true, "new supplier with valid details"],
+      [newSupplier, { partnerName: "Sample Supplier" }, false, "new supplier duplicating an existing name (5a)"],
+      [newSupplier, { partnerName: "  " }, false, "blank name"],
+      [newSupplier, { partnerName: "Nile Foods", leadTimeDays: -3 }, false, "negative lead time"],
+      [newSupplier, { partnerName: "Nile Foods", leadTimeDays: 2.5 }, false, "lead time that is not a whole number"],
+      [newCustomer, { partnerName: "Mona", phoneNumber: "514-555-0300", email: "mona@example.com" }, true, "new customer with valid details"],
+      [newCustomer, { partnerName: "Mona", phoneNumber: "514-555-0200" }, false, "new customer duplicating a phone number (5a)"],
+      [newCustomer, { partnerName: "Mona", email: "not-an-email" }, false, "invalid email"],
+      [newCustomer, { partnerName: "Mona", phoneNumber: "" }, false, "blank phone number"],
+      [bp1, { partnerName: "Sample Supplier" }, true, "existing supplier keeping its own name"],
+      [bp2, { phoneNumber: "514-555-0200" }, true, "existing customer keeping its own phone number"],
+      [bp1, { partnerType: "Customer" }, false, "changing partnerType"],
+      [bp1, { partnerStatus: "Deleted" }, false, "unknown status"],
+      [bp1, {}, false, "no changes submitted"],
+    ];
+    for (const [partner, changes, expected, label] of cases) {
+      assert.equal(await partner.validateProfile(changes), expected, `validateProfile: ${label}`);
+    }
+    pass(`validateProfile() gives the expected result in all ${cases.length} cases`);
+
+    await bp1.reload();
+    assert.equal(bp1.partnerName, "Sample Supplier");
+    pass("validateProfile() saved nothing: the stored profile is unchanged");
+
     // ----- 7. updateProfile() and changeStatus() -----
     console.log("\n7. Profile updates");
 
     customerPartner = await customer.getPartner();
     originalCustomerName = customerPartner.partnerName;
 
-    await customerPartner.updateProfile({ partnerName: "Sample Customer (updated)", partnerId: "IGNORED" });
-    await customerPartner.changeStatus("Inactive");
+    await expectRejected(
+      () => customerPartner.updateProfile({ partnerName: "Renamed", partnerId: "BP-HACKED" }),
+      "updateProfile() trying to change partnerId"
+    );
     await customerPartner.reload();
     assert.equal(customerPartner.partnerId, "BP-002");
+    assert.equal(customerPartner.partnerName, originalCustomerName);
+    pass("the rejected update saved nothing (name and partnerId unchanged)");
+
+    await customerPartner.updateProfile({ partnerName: "Sample Customer (updated)" });
+    await customerPartner.changeStatus("Inactive");
+    await customerPartner.reload();
     assert.equal(customerPartner.partnerName, "Sample Customer (updated)");
     assert.equal(customerPartner.partnerStatus, "Inactive");
-    pass("updateProfile() changed the name, ignored partnerId; changeStatus() set Inactive");
+    pass("updateProfile() changed the name; changeStatus() set Inactive");
 
     await expectRejected(
       () => customerPartner.changeStatus("Deleted"),
       'changeStatus("Deleted")'
     );
+
+    // ----- 8. Complete, validated profile updates (2S.1-2S.3) -----
+    console.log("\n8. Complete profile updates");
+
+    const supplierRow = await Supplier.findByPk("SUP-001");
+    originalSupplierFields = {
+      contactInformation: supplierRow.contactInformation,
+      leadTimeDays: supplierRow.leadTimeDays,
+      paymentTerms: supplierRow.paymentTerms,
+    };
+    supplierPartner = await BusinessPartner.findByPk("BP-001");
+    await supplierPartner.updateProfile({
+      contactInformation: "  sales@samplesupplier.ca  ",
+      leadTimeDays: 10,
+      paymentTerms: "Net 45",
+    });
+    await supplierRow.reload();
+    assert.equal(supplierRow.contactInformation, "sales@samplesupplier.ca");
+    assert.equal(supplierRow.leadTimeDays, 10);
+    assert.equal(supplierRow.paymentTerms, "Net 45");
+    pass("updateProfile() saves the supplier's contact information, lead time and payment terms (text trimmed)");
+
+    const customerRow = await Customer.findByPk("CUST-001");
+    originalCustomerFields = { phoneNumber: customerRow.phoneNumber, email: customerRow.email };
+    await customerPartner.updateProfile({
+      partnerName: "Sample Customer (moved)",
+      phoneNumber: "514-555-0299",
+      email: "new.address@example.com",
+    });
+    await customerRow.reload();
+    await customerPartner.reload();
+    assert.equal(customerPartner.partnerName, "Sample Customer (moved)");
+    assert.equal(customerRow.phoneNumber, "514-555-0299");
+    assert.equal(customerRow.email, "new.address@example.com");
+    pass("updateProfile() saves the shared name and the customer's phone number and email together");
+
+    await expectRejected(
+      () => supplierPartner.updateProfile({ leadTimeDays: -5, paymentTerms: "Net 60" }),
+      "updateProfile() with a negative lead time"
+    );
+    await expectRejected(
+      () => customerPartner.updateProfile({ partnerName: "Should Not Save", email: "not-an-email" }),
+      "updateProfile() with an invalid email"
+    );
+    await supplierRow.reload();
+    await customerPartner.reload();
+    assert.equal(supplierRow.paymentTerms, "Net 45");
+    assert.equal(customerPartner.partnerName, "Sample Customer (moved)");
+    pass("invalid updates saved nothing: no field of the profile changed (2S.3 Invalid)");
+
+    // ----- 9. Duplicates are blocked by updateProfile() AND by the database (5a) -----
+    console.log("\n9. Duplicate profiles cannot be saved");
+
+    const nile = await BusinessPartner.create({
+      partnerId: TEST_SUPPLIER.partnerId,
+      partnerName: "Nile Foods (test)",
+      partnerType: "Supplier",
+    });
+    await Supplier.create({ supplierId: TEST_SUPPLIER.supplierId, partnerId: nile.partnerId, leadTimeDays: 5 });
+
+    await expectRejected(
+      () => nile.updateProfile({ partnerName: "Sample Supplier" }),
+      "updateProfile() renaming a supplier to an existing supplier's name"
+    );
+    await expectRejected(
+      async () => {
+        nile.partnerName = "Sample Supplier";
+        await nile.save();
+      },
+      "saving a duplicate supplier name directly, bypassing updateProfile() (database index)"
+    );
+    await nile.reload();
+    assert.equal(nile.partnerName, "Nile Foods (test)");
+    await expectRejected(
+      () => BusinessPartner.create({ partnerId: "BP-TEST-DUP-NAME", partnerName: "Sample Supplier", partnerType: "Supplier" }),
+      "creating a second supplier profile named Sample Supplier (database index)"
+    );
+
+    await BusinessPartner.create({
+      partnerId: TEST_CUSTOMER_PARTNERS[0],
+      partnerName: "Sample Supplier", // a customer may share a supplier's name
+      partnerType: "Customer",
+    });
+    pass("a customer may have the same name as a supplier: the rule is per supplier");
+    await expectRejected(
+      () => Customer.create({ customerId: "CUST-TEST-DUP", partnerId: TEST_CUSTOMER_PARTNERS[0], phoneNumber: "514-555-0299" }),
+      "creating a second customer with phone 514-555-0299, bypassing validateProfile() (database index)"
+    );
+
+    // 9a: a supplier with no deliveries.
+    const emptyReport = await (await Supplier.findByPk(TEST_SUPPLIER.supplierId)).getPerformanceReport();
+    assert.equal(emptyReport.deliveriesRecorded, 0);
+    assert.equal(emptyReport.averageLeadTime, null);
+    assert.equal(emptyReport.onTimeDeliveryRate, null);
+    assert.equal(emptyReport.averageFillRate, null);
+    assert.equal(emptyReport.message, "No deliveries were recorded for this supplier.");
+    pass("getPerformanceReport() for a supplier with no deliveries: no metrics, 9a message");
 
     console.log(`\nProfile verification successful (${passed} checks passed).`);
   } catch (error) {
@@ -244,6 +507,17 @@ async function verifyProfiles() {
   } finally {
     // Put the sample data back so the script can be run again.
     try {
+      await Notification.destroy({ where: { notificationId: TEST_NOTIFICATIONS } });
+      await Supplier.destroy({ where: { supplierId: TEST_SUPPLIER.supplierId } });
+      await BusinessPartner.destroy({
+        where: { partnerId: [TEST_SUPPLIER.partnerId, ...TEST_CUSTOMER_PARTNERS, "BP-TEST-DUP-NAME"] },
+      });
+      if (originalSupplierFields) {
+        await Supplier.update(originalSupplierFields, { where: { supplierId: "SUP-001" }, hooks: false });
+      }
+      if (originalCustomerFields) {
+        await Customer.update(originalCustomerFields, { where: { customerId: "CUST-001" }, hooks: false });
+      }
       if (supplierPartner && originalSupplierName) {
         await supplierPartner.reload();
         await supplierPartner.updateProfile({ partnerName: originalSupplierName });

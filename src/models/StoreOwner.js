@@ -2,6 +2,22 @@ const { Model, DataTypes } = require("sequelize");
 const sequelize = require("../database");
 const RestockAlert = require("./RestockAlert");
 
+// Feature 3: shared by notifyDiscrepancy() and notifyUnplannedDelivery().
+// Saves one notification per delivery and type in the owner's inbox.
+async function storeDeliveryNotification(owner, record, notificationType, message) {
+  const suffix = notificationType === "Discrepancy" ? "DISCREPANCY" : "UNPLANNED";
+  const [notification] = await sequelize.models.Notification.findOrCreate({
+    where: { notificationId: `NTF-${record.recordId}-${suffix}` },
+    defaults: {
+      notificationType,
+      message,
+      ownerId: owner.ownerId,
+      recordId: record.recordId,
+    },
+  });
+  return notification;
+}
+
 class StoreOwner extends Model {
   // ----- Shared with Feature 6 (Customer Support) -----
   // ComplaintCase is built by the Feature 6 team; these work on any complaint object.
@@ -42,6 +58,59 @@ class StoreOwner extends Model {
     }
 
     return shifts;
+  }
+
+  // ----- Feature 3 (Supplier & Customer Profile Management) -----
+
+  // Notify the owner that a delivery has a discrepancy (alternate flow 6a):
+  // short, over, damaged or expired. Stores the notification in the owner's
+  // inbox and returns it. Notifying twice for the same delivery returns the
+  // notification already stored.
+  async notifyDiscrepancy(recordId) {
+    const record = await sequelize.models.PerformanceRecord.findByPk(recordId);
+    if (!record) {
+      throw new Error(`Performance record ${recordId} does not exist.`);
+    }
+    if (!record.flagDiscrepancy()) {
+      throw new Error(`Performance record ${recordId} has no discrepancy to report.`);
+    }
+    return storeDeliveryNotification(
+      this,
+      record,
+      "Discrepancy",
+      `Delivery ${recordId} from supplier ${record.supplierId}: received ` +
+        `${record.quantityReceived} of ${record.quantityOrdered ?? "-"}, condition ${record.conditionRating}.`
+    );
+  }
+
+  // Notify the owner that a delivery arrived without a purchase order
+  // (alternate flow 6b). Stores the notification and returns it.
+  async notifyUnplannedDelivery(recordId) {
+    const record = await sequelize.models.PerformanceRecord.findByPk(recordId);
+    if (!record) {
+      throw new Error(`Performance record ${recordId} does not exist.`);
+    }
+    if (!record.isUnplanned) {
+      throw new Error(`Performance record ${recordId} is not an unplanned delivery.`);
+    }
+    return storeDeliveryNotification(
+      this,
+      record,
+      "Unplanned delivery",
+      `Delivery ${recordId} from supplier ${record.supplierId} had no purchase order: ` +
+        `${record.quantityReceived} received, condition ${record.conditionRating}.`
+    );
+  }
+
+  // The owner's unread delivery notifications, oldest first.
+  async reviewNotifications() {
+    return sequelize.models.Notification.findAll({
+      where: { ownerId: this.ownerId, status: "Unread" },
+      order: [
+        ["sentDate", "ASC"],
+        ["notificationId", "ASC"],
+      ],
+    });
   }
 }
 

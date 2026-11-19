@@ -32,6 +32,7 @@ const FinancialReport = require("./FinancialReport");
 const BusinessPartner = require("./BusinessPartner");
 const Customer = require("./Customer");
 const PerformanceRecord = require("./PerformanceRecord");
+const Notification = require("./Notification");
 
 // Feature 6 - Customer Support (and the shared Sale classes it relies on)
 const ComplaintCase = require("./ComplaintCase");
@@ -282,6 +283,35 @@ PerformanceRecord.belongsTo(Employee, {
   onUpdate: "CASCADE",
 });
 
+// StoreOwner 1 ---- 0..* Notification (receives; alternate flows 6a, 6b)
+StoreOwner.hasMany(Notification, {
+  foreignKey: { name: "ownerId", allowNull: false },
+  as: "notifications",
+  onDelete: "RESTRICT",
+  onUpdate: "CASCADE",
+});
+
+Notification.belongsTo(StoreOwner, {
+  foreignKey: { name: "ownerId", allowNull: false },
+  as: "owner",
+  onDelete: "RESTRICT",
+  onUpdate: "CASCADE",
+});
+
+// PerformanceRecord 1 ---- 0..* Notification (is about)
+PerformanceRecord.hasMany(Notification, {
+  foreignKey: { name: "recordId", allowNull: false },
+  as: "notifications",
+  onDelete: "RESTRICT",
+  onUpdate: "CASCADE",
+});
+
+Notification.belongsTo(PerformanceRecord, {
+  foreignKey: { name: "recordId", allowNull: false },
+  as: "performanceRecord",
+  onDelete: "RESTRICT",
+  onUpdate: "CASCADE",
+});
 
 // ----- Feature 6 - Customer Support -----
 
@@ -464,6 +494,7 @@ module.exports = {
   BusinessPartner,
   Customer,
   PerformanceRecord,
+  Notification,
   ComplaintCase,
   SupportRequest,
   ReturnRequest,
