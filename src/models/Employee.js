@@ -1,5 +1,6 @@
 const { Model, DataTypes } = require("sequelize");
 const sequelize = require("../database");
+const { guardMethods } = require("../utils/supportGuard");
 
 class Employee extends Model {
   // Return this employee's shifts, ordered by date and start time.
@@ -79,8 +80,13 @@ class Employee extends Model {
   }
 
   // Create a return for `quantity` units of one sale line and decide it straight away.
-  // Returns true when the refund was processed, false when it was rejected.
   // amount = quantity x unit price of the line.
+  // Returns { refunded, status, reason, returnId, amount, balanceUpdated }:
+  //   refunded       true when the refund was processed, false when it was rejected,
+  //   reason         why it was rejected (null when refunded), to show the customer,
+  //   balanceUpdated false only when the refund is saved but the ledger balance could not
+  //                  be recalculated yet (it is corrected on the next recalculation).
+  // Unexpected failures are thrown as a SupportError and nothing is left behind.
   async requestReturn(customerId, saleId, saleItemId, quantity, reason = "Customer return") {
     const { SaleItem, ReturnRequest } = require("./index");
     const generateId = require("../utils/generateId");
@@ -105,7 +111,29 @@ class Employee extends Model {
       employeeId: this.employeeId,
     });
 
-    return returnRequest.processRefund();
+    try {
+      const refunded = await returnRequest.processRefund();
+      return {
+        refunded,
+        status: returnRequest.status,
+        reason: refunded ? null : returnRequest.rejectionReason,
+        returnId: returnRequest.returnId,
+        amount: returnRequest.amount,
+        balanceUpdated: refunded ? returnRequest.ledgerBalanceUpdated !== false : null,
+      };
+    } catch (error) {
+      // The refund failed and was rolled back. Remove the Pending request that was just
+      // created so that trying again does not leave a duplicate behind.
+      try {
+        await returnRequest.reload();
+        if (returnRequest.status === "Pending") {
+          await returnRequest.destroy();
+        }
+      } catch (cleanupError) {
+        // Best effort only: the original error is the one to report.
+      }
+      throw error;
+    }
   }
 
   // Hand a complaint case to the store owner (use case alternate flow 5a).
@@ -224,5 +252,20 @@ Employee.init(
     timestamps: false,
   }
 );
+
+// retry: only read-only methods are retried automatically when the database is busy.
+guardMethods(Employee, {
+  searchAccount: { action: "looking up the customer account", retry: true },
+  assistCustomer: { action: "loading the customer records", retry: true },
+  createComplaintCase: { action: "creating the complaint case" },
+  reviewIssue: { action: "loading the complaint case", retry: true },
+  requestReturn: { action: "processing the return" },
+  escalateComplaint: { action: "escalating the complaint" },
+  flagMissingRecord: { action: "flagging the missing record" },
+  openSupportRequest: { action: "opening the support request" },
+  addNotes: { action: "adding the note to the support request" },
+  addSoldProduct: { action: "adding the sold product" },
+  removeSoldProduct: { action: "removing the sold product" },
+});
 
 module.exports = Employee;

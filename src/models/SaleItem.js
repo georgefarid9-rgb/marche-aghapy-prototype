@@ -1,5 +1,6 @@
 const { Model, DataTypes } = require("sequelize");
 const sequelize = require("../database");
+const { guardMethods } = require("../utils/supportGuard");
 
 // Shared sales classes (used by Feature 6 - Customer Support).
 // One line of a Sale: a product, how many were sold, and the price each.
@@ -63,5 +64,9 @@ SaleItem.init(
     timestamps: false,
   }
 );
+
+guardMethods(SaleItem, {
+  recordReturn: { action: "recording the returned items" },
+});
 
 module.exports = SaleItem;

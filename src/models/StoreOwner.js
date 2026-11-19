@@ -1,6 +1,7 @@
 const { Model, DataTypes } = require("sequelize");
 const sequelize = require("../database");
 const RestockAlert = require("./RestockAlert");
+const { guardMethods } = require("../utils/supportGuard");
 
 // Feature 3: shared by notifyDiscrepancy() and notifyUnplannedDelivery().
 // Saves one notification per delivery and type in the owner's inbox.
@@ -161,5 +162,11 @@ StoreOwner.init(
     timestamps: false,
   }
 );
+
+guardMethods(StoreOwner, {
+  resolveCase: { action: "resolving the complaint case" },
+  listPendingCases: { action: "loading the pending cases", retry: true },
+  listMissingRecordFlags: { action: "loading the missing-record flags", retry: true },
+});
 
 module.exports = StoreOwner;

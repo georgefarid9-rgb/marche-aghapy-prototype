@@ -1,6 +1,7 @@
 const { Model, DataTypes, Transaction } = require("sequelize");
 const sequelize = require("../database");
 const { today, daysBetween } = require("../utils/dates");
+const { guardMethods } = require("../utils/supportGuard");
 
 // Feature 6 - Customer Support
 // A customer's request to return a sale (in whole or in part) and be refunded.
@@ -28,7 +29,8 @@ class ReturnRequest extends Model {
   //   4. the sale belongs to the same customer as the request,
   //   5. the sale date is not in the future,
   //   6. the sale is inside the return window,
-  //   7. quantity (when given) does not exceed the units still returnable on the sale line,
+  //   7. a sale line and a quantity come together, the quantity does not exceed the units
+  //      still returnable, and the amount equals quantity x the line's unit price,
   //   8. the amount does not exceed what is still refundable on the sale
   //      (sale total minus refunds already paid out).
   // Pass { transaction } to run the reads inside a transaction.
@@ -60,7 +62,11 @@ class ReturnRequest extends Model {
       return `sale ${sale.saleId} is outside the ${RETURN_WINDOW_DAYS}-day return window`;
     }
 
-    // When the return names a sale line and a quantity, that many units must still be returnable.
+    // A return of a sale line needs both the line and the quantity, and the amount must be
+    // exactly quantity x the unit price the item was sold for.
+    if (Boolean(this.saleItemId) !== Boolean(this.quantity)) {
+      return "a sale item and a quantity must be given together";
+    }
     if (this.saleItemId && this.quantity) {
       const item = await this.getSaleItem({ transaction });
       if (!item || item.saleId !== this.saleId) {
@@ -68,6 +74,10 @@ class ReturnRequest extends Model {
       }
       if (this.quantity > item.quantity - item.returnedQuantity) {
         return `only ${item.quantity - item.returnedQuantity} unit(s) of sale item ${item.saleItemId} can still be returned`;
+      }
+      const expectedCents = toCents(item.unitPrice * this.quantity);
+      if (toCents(this.amount) !== expectedCents) {
+        return `the refund amount must be ${(expectedCents / 100).toFixed(2)} for ${this.quantity} unit(s) of sale item ${item.saleItemId}`;
       }
     }
 
@@ -107,8 +117,14 @@ class ReturnRequest extends Model {
   // refund amount either way. Change REFUND_TRANSACTION_TYPE if Feature 4 adds "Refund".
   // The ledger balance is recalculated after the commit, because Ledger.addTransaction()
   // does not take a database transaction and would wait on the lock held here.
+  //
+  // Afterwards, this.rejectionReason holds why a rejected return was rejected (null when
+  // refunded) and this.ledgerBalanceUpdated says whether the balance was recalculated.
   async processRefund() {
     let ledger = null;
+    let rejectionReason = null;
+    this.rejectionReason = null;
+    this.ledgerBalanceUpdated = null;
 
     const eligible = await sequelize.transaction(
       { type: Transaction.TYPES.IMMEDIATE },
@@ -120,7 +136,9 @@ class ReturnRequest extends Model {
           throw new Error(`Return ${this.returnId} was already ${this.status}.`);
         }
 
-        const isEligible = await this.checkEligibility({ transaction });
+        const reason = await this.getIneligibilityReason({ transaction });
+        const isEligible = reason === null;
+        rejectionReason = reason;
 
         if (isEligible) {
           if (this.saleItemId && this.quantity) {
@@ -148,8 +166,21 @@ class ReturnRequest extends Model {
       }
     );
 
+    this.rejectionReason = rejectionReason;
+
+    // The refund is already saved at this point. The balance is only a total of all ledger
+    // entries, so if updating it fails (for example the connection dropped) the refund must
+    // not be reported as failed: the next recalculation fixes the balance.
     if (ledger) {
-      await ledger.recalculateBalance();
+      try {
+        await ledger.recalculateBalance();
+        this.ledgerBalanceUpdated = true;
+      } catch (error) {
+        this.ledgerBalanceUpdated = false;
+        console.error(
+          `[Feature 6] Refund ${this.returnId} was saved, but the ledger balance could not be updated yet (${error.message}). It will be corrected on the next recalculation.`
+        );
+      }
     }
     return eligible;
   }
@@ -224,5 +255,13 @@ ReturnRequest.init(
 ReturnRequest.RETURN_STATUSES = RETURN_STATUSES;
 ReturnRequest.RETURN_WINDOW_DAYS = RETURN_WINDOW_DAYS;
 ReturnRequest.REFUND_TRANSACTION_TYPE = REFUND_TRANSACTION_TYPE;
+
+// retry: processRefund runs in one transaction, so a busy database can safely be retried.
+guardMethods(ReturnRequest, {
+  getIneligibilityReason: { action: "checking the return" },
+  checkEligibility: { action: "checking the return" },
+  findLedger: { action: "finding the store ledger" },
+  processRefund: { action: "processing the refund", retry: true },
+});
 
 module.exports = ReturnRequest;

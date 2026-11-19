@@ -1,4 +1,6 @@
 const sequelize = require("../src/database");
+const installGracefulShutdown = require("../src/utils/gracefulShutdown");
+const { SupportError } = require("../src/utils/supportGuard");
 const { today } = require("../src/utils/dates");
 
 const {
@@ -27,10 +29,10 @@ const OTHER_CUSTOMER_ID = "CUST-VERIFY-2";
 const CASE_IDS = ["CASE-VERIFY-1", "CASE-VERIFY-2"];
 const RETURN_IDS = [
   "RET-VERIFY-1", "RET-VERIFY-2", "RET-VERIFY-3", "RET-VERIFY-4",
-  "RET-VERIFY-5", "RET-VERIFY-6", "RET-VERIFY-7", "RET-VERIFY-8", "RET-VERIFY-9", "RET-VERIFY-RB",
+  "RET-VERIFY-5", "RET-VERIFY-6", "RET-VERIFY-7", "RET-VERIFY-8", "RET-VERIFY-9", "RET-VERIFY-RB", "RET-VERIFY-AMT1", "RET-VERIFY-AMT2", "RET-VERIFY-AMT3", "RET-VERIFY-AMT4",
 ];
 const REQUEST_IDS = ["REQ-VERIFY-1"];
-const SALE_IDS = ["SALE-VERIFY-OLD", "SALE-VERIFY-FUTURE", "SALE-VERIFY-CONC", "SALE-VERIFY-WALKIN", "SALE-VERIFY-LINE", "SALE-VERIFY-RB"];
+const SALE_IDS = ["SALE-VERIFY-OLD", "SALE-VERIFY-FUTURE", "SALE-VERIFY-CONC", "SALE-VERIFY-WALKIN", "SALE-VERIFY-LINE", "SALE-VERIFY-RB", "SALE-VERIFY-AMT"];
 const createdRequestIds = [];
 let tempLedgerId = null;
 
@@ -75,6 +77,8 @@ async function removeVerifyData() {
   await Customer.destroy({ where: { customerId: OTHER_CUSTOMER_ID } });
   await BusinessPartner.destroy({ where: { partnerId: "BP-VERIFY-2" } });
 }
+
+installGracefulShutdown(sequelize);
 
 async function verifyCustomerSupport() {
   let sampleSale = null;
@@ -273,7 +277,9 @@ async function verifyCustomerSupport() {
     const stockBefore = (await InventoryRecord.findOne({ where: { productId: "PROD-001" } })).quantityOnHand;
     const balanceBefore = (await ledger.reload()).currentBalance;
 
-    check((await employee.requestReturn(CUSTOMER_ID, "SALE-VERIFY-LINE", line.saleItemId, 1)) === true, "returning 1 of 4 units is refunded");
+    const firstReturn = await employee.requestReturn(CUSTOMER_ID, "SALE-VERIFY-LINE", line.saleItemId, 1);
+    check(firstReturn.refunded === true && firstReturn.status === "Refunded" && firstReturn.reason === null, "returning 1 of 4 units is refunded");
+    check(firstReturn.amount === 3 && firstReturn.balanceUpdated === true && firstReturn.returnId.startsWith("RET-"), "the result gives the amount, the return id and that the balance was updated");
     const afterOne = await SaleItem.findByPk(line.saleItemId);
     check(afterOne.returnedQuantity === 1 && afterOne.returnableQuantity === 3, "returnedQuantity is 1, returnable is 3");
     check((await InventoryRecord.findOne({ where: { productId: "PROD-001" } })).quantityOnHand === stockBefore, "stock is NOT put back");
@@ -281,11 +287,39 @@ async function verifyCustomerSupport() {
     const refundTx = (await Transaction.findAll({ where: { ledgerId: ledger.ledgerId, category: "Refund" } })).filter((t) => t.transactionId.startsWith("REF-RET-"));
     check(refundTx.length === 1 && refundTx[0].amount === 3, "one Refund entry of 3.00 was added to the ledger");
 
-    check((await employee.requestReturn(CUSTOMER_ID, "SALE-VERIFY-LINE", line.saleItemId, 3)) === true, "returning the other 3 units is refunded");
-    check((await employee.requestReturn(CUSTOMER_ID, "SALE-VERIFY-LINE", line.saleItemId, 1)) === false, "a 5th unit is rejected (only 4 were sold)");
+    check((await employee.requestReturn(CUSTOMER_ID, "SALE-VERIFY-LINE", line.saleItemId, 3)).refunded === true, "returning the other 3 units is refunded");
+    const fifth = await employee.requestReturn(CUSTOMER_ID, "SALE-VERIFY-LINE", line.saleItemId, 1);
+    check(fifth.refunded === false && fifth.status === "Rejected", "a 5th unit is rejected (only 4 were sold)");
+    check(typeof fifth.reason === "string" && fifth.reason.includes("only 0 unit(s)"), "the employee gets the reason for the rejection");
     check((await SaleItem.findByPk(line.saleItemId)).returnedQuantity === 4, "returnedQuantity stays 4");
     await checkThrows(() => employee.requestReturn(CUSTOMER_ID, "SALE-001", line.saleItemId, 1), "was not found on sale", "a line from another sale is refused");
     await checkThrows(() => line.recordReturn(0), "whole number", "recordReturn() refuses 0");
+
+    console.log("\nRefund amount must match quantity x unit price");
+    const amtSale = await Sale.create({ saleId: "SALE-VERIFY-AMT", saleDate: today(), totalAmount: 0, customerId: CUSTOMER_ID, employeeId: employee.employeeId });
+    const amtLine = await amtSale.addItem({ productId: "PROD-001", quantity: 3, unitPrice: 3 });
+    const amtTooMuch = await ReturnRequest.create({
+      returnId: "RET-VERIFY-AMT1", reason: "Verification", amount: 9, quantity: 1, saleItemId: amtLine.saleItemId,
+      customerId: CUSTOMER_ID, saleId: "SALE-VERIFY-AMT", employeeId: employee.employeeId,
+    });
+    check((await amtTooMuch.processRefund()) === false, "1 unit priced at 3.00 cannot be refunded as 9.00");
+    check(amtTooMuch.status === "Rejected" && amtTooMuch.rejectionReason.includes("must be 3.00"), "the reason names the correct amount");
+    check((await SaleItem.findByPk(amtLine.saleItemId)).returnedQuantity === 0, "nothing was recorded as returned");
+    const amtTooLittle = await ReturnRequest.create({
+      returnId: "RET-VERIFY-AMT2", reason: "Verification", amount: 2, quantity: 1, saleItemId: amtLine.saleItemId,
+      customerId: CUSTOMER_ID, saleId: "SALE-VERIFY-AMT", employeeId: employee.employeeId,
+    });
+    check((await amtTooLittle.processRefund()) === false, "a refund below the item price is also rejected");
+    const amtNoQuantity = await ReturnRequest.create({
+      returnId: "RET-VERIFY-AMT3", reason: "Verification", amount: 3, saleItemId: amtLine.saleItemId,
+      customerId: CUSTOMER_ID, saleId: "SALE-VERIFY-AMT", employeeId: employee.employeeId,
+    });
+    check((await amtNoQuantity.processRefund()) === false && amtNoQuantity.rejectionReason.includes("together"), "a sale item without a quantity is rejected");
+    const amtExact = await ReturnRequest.create({
+      returnId: "RET-VERIFY-AMT4", reason: "Verification", amount: 3, quantity: 1, saleItemId: amtLine.saleItemId,
+      customerId: CUSTOMER_ID, saleId: "SALE-VERIFY-AMT", employeeId: employee.employeeId,
+    });
+    check((await amtExact.processRefund()) === true, "the amtExact amount (3.00) is refunded");
 
     console.log("\nRefund failure rolls everything back");
     const noLedgerEmp = await Employee.create({ employeeId: "EMP-VERIFY-NL", employeeName: "No Store", role: "Cashier" });
@@ -299,6 +333,80 @@ async function verifyCustomerSupport() {
     await checkThrows(() => rbReturn.processRefund(), "No ledger", "a refund with no ledger raises an error");
     check((await ReturnRequest.findByPk("RET-VERIFY-RB")).status === "Pending", "the return stays Pending");
     check((await SaleItem.findByPk(line2.saleItemId)).returnedQuantity === 0, "returnedQuantity was not changed");
+
+    // ---- Unexpected failures (power cut, lost connection, busy database) ----
+    console.log("\nUnexpected failures are handled (an error line printed below is expected)");
+
+    const realCreate = SupportRequest.create;
+    SupportRequest.create = async () => {
+      const failure = new Error("disk I/O error");
+      failure.code = "SQLITE_IOERR";
+      throw failure;
+    };
+    try {
+      await employee.openSupportRequest(CUSTOMER_ID, "x", "y");
+      check(false, "an unexpected failure is reported (nothing was thrown)");
+    } catch (err) {
+      check(
+        err instanceof SupportError && err.message.startsWith("Something went wrong while opening the support request") && err.retryable === true,
+        "an unexpected failure becomes a friendly 'something went wrong, try again' error"
+      );
+    } finally {
+      SupportRequest.create = realCreate;
+    }
+
+    const realFindAll = ComplaintCase.findAll;
+    let findAllCalls = 0;
+    ComplaintCase.findAll = async function (...args) {
+      findAllCalls += 1;
+      if (findAllCalls === 1) {
+        const busy = new Error("database is locked");
+        busy.code = "SQLITE_BUSY";
+        throw busy;
+      }
+      return realFindAll.apply(this, args);
+    };
+    try {
+      const list = await owner.listPendingCases();
+      check(Array.isArray(list) && findAllCalls === 2, "a busy database is retried automatically and the list loads");
+    } finally {
+      ComplaintCase.findAll = realFindAll;
+    }
+
+    const realProcess = ReturnRequest.prototype.processRefund;
+    const countReturns = () => ReturnRequest.count({ where: { saleId: "SALE-VERIFY-RB" } });
+    const returnsBefore = await countReturns();
+    ReturnRequest.prototype.processRefund = async () => {
+      throw new SupportError("processing the refund", new Error("connection lost"), true);
+    };
+    try {
+      await checkThrows(
+        () => employee.requestReturn(CUSTOMER_ID, "SALE-VERIFY-RB", line2.saleItemId, 1),
+        "Something went wrong",
+        "a failed refund reports 'something went wrong'"
+      );
+    } finally {
+      ReturnRequest.prototype.processRefund = realProcess;
+    }
+    check((await countReturns()) === returnsBefore, "no half-made Pending return is left behind, so retrying does not duplicate");
+
+    const realRecalc = Ledger.prototype.recalculateBalance;
+    const balanceBeforeFailure = (await ledger.reload()).currentBalance;
+    Ledger.prototype.recalculateBalance = async () => {
+      throw new Error("connection lost");
+    };
+    let balanceFailureResult;
+    try {
+      balanceFailureResult = await employee.requestReturn(CUSTOMER_ID, "SALE-VERIFY-RB", line2.saleItemId, 1);
+    } finally {
+      Ledger.prototype.recalculateBalance = realRecalc;
+    }
+    check(
+      balanceFailureResult.refunded === true && balanceFailureResult.balanceUpdated === false,
+      "a saved refund is reported as done, with balanceUpdated false when only the balance update failed"
+    );
+    await ledger.recalculateBalance();
+    check((await ledger.reload()).currentBalance === balanceBeforeFailure - 5, "the ledger balance is corrected by the next recalculation");
 
     // ---- Shared sale methods ----
     console.log("\nSale.addItem(), removeItem(), recalculateTotal()");

@@ -1,5 +1,6 @@
 const { Model, DataTypes } = require("sequelize");
 const sequelize = require("../database");
+const { guardMethods } = require("../utils/supportGuard");
 
 // Feature 6 - Customer Support
 // A question or request a customer submits. The employee who helps the customer
@@ -69,5 +70,10 @@ SupportRequest.init(
 );
 
 SupportRequest.REQUEST_STATUSES = REQUEST_STATUSES;
+
+guardMethods(SupportRequest, {
+  logInteraction: { action: "logging the support interaction" },
+  addNotes: { action: "adding the note to the support request" },
+});
 
 module.exports = SupportRequest;
