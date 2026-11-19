@@ -5,19 +5,19 @@ const sequelize = require("../database");
 // Customer is a kind of BusinessPartner (linked through partnerId).
 
 class Customer extends Model {
-  // Return the customer's full profile: shared BusinessPartner fields
-  // plus the Customer-specific fields.
+  // Find the customer profile with this phone number (class-scope operation,
+  // used by alternate flows 2a and 5a). Returns the Customer, or null.
+  static async findProfile(phoneNumber) {
+    if (phoneNumber === undefined || phoneNumber === null || String(phoneNumber).trim() === "") {
+      return null;
+    }
+    return Customer.findOne({ where: { phoneNumber: String(phoneNumber).trim() } });
+  }
+
+  // Inherited from BusinessPartner: the customer's profile as readable text.
   async retrieveInfo() {
     const partner = await this.getPartner();
-    return {
-      customerId: this.customerId,
-      partnerId: this.partnerId,
-      name: partner ? partner.partnerName : null,
-      status: partner ? partner.partnerStatus : null,
-      phoneNumber: this.phoneNumber,
-      email: this.email,
-      createdDate: this.createdDate,
-    };
+    return partner ? partner.retrieveInfo() : null;
   }
 
   // /purchaseHistory: the customer's Sales, newest first.
@@ -36,10 +36,14 @@ class Customer extends Model {
     });
   }
 
-  // Customer reaches out to store staff (Feature 6 - Customer Support).
-  // Placeholder: the class diagram has no Customer-Employee contact record.
-  contactEmployee() {
-    return null;
+  // Customer reaches out to store staff with a question (Feature 6 - Customer
+  // Support, use case 6 step 1). The question is handed over to the employee;
+  // Feature 6 records the interaction as a SupportRequest.
+  contactEmployee(question) {
+    if (question === undefined || question === null || String(question).trim() === "") {
+      throw new Error(`Customer ${this.customerId}: a question is required.`);
+    }
+    return { customerId: this.customerId, question: String(question).trim() };
   }
 }
 
@@ -81,6 +85,15 @@ Customer.init(
     modelName: "Customer",
     tableName: "customers",
     timestamps: false,
+    // 5a enforced by the database too: one customer profile per phone number.
+    // (SQLite allows several customers with no phone number.)
+    indexes: [
+      {
+        name: "customers_unique_phone_number",
+        unique: true,
+        fields: ["phoneNumber"],
+      },
+    ],
     hooks: {
       // The linked partner must exist and be a Customer.
       async beforeValidate(customer, options) {
