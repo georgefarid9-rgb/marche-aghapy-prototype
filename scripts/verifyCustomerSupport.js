@@ -284,8 +284,11 @@ async function verifyCustomerSupport() {
     check(afterOne.returnedQuantity === 1 && afterOne.returnableQuantity === 3, "returnedQuantity is 1, returnable is 3");
     check((await InventoryRecord.findOne({ where: { productId: "PROD-001" } })).quantityOnHand === stockBefore, "stock is NOT put back");
     check((await ledger.reload()).currentBalance === balanceBefore - 3, "ledger balance fell by the refund (3.00)");
-    const refundTx = (await Transaction.findAll({ where: { ledgerId: ledger.ledgerId, category: "Refund" } })).filter((t) => t.transactionId.startsWith("REF-RET-"));
-    check(refundTx.length === 1 && refundTx[0].amount === 3, "one Refund entry of 3.00 was added to the ledger");
+    const refundTx = await Transaction.findAll({ where: { transactionId: `REF-${firstReturn.returnId}` } });
+    check(
+      refundTx.length === 1 && refundTx[0].amount === 3 && refundTx[0].category === "Refund" && refundTx[0].ledgerId === ledger.ledgerId,
+      "exactly one Refund entry of 3.00 was added to the ledger for this return"
+    );
 
     check((await employee.requestReturn(CUSTOMER_ID, "SALE-VERIFY-LINE", line.saleItemId, 3)).refunded === true, "returning the other 3 units is refunded");
     const fifth = await employee.requestReturn(CUSTOMER_ID, "SALE-VERIFY-LINE", line.saleItemId, 1);
@@ -319,7 +322,7 @@ async function verifyCustomerSupport() {
       returnId: "RET-VERIFY-AMT4", reason: "Verification", amount: 3, quantity: 1, saleItemId: amtLine.saleItemId,
       customerId: CUSTOMER_ID, saleId: "SALE-VERIFY-AMT", employeeId: employee.employeeId,
     });
-    check((await amtExact.processRefund()) === true, "the amtExact amount (3.00) is refunded");
+    check((await amtExact.processRefund()) === true, "the exact amount (3.00) is refunded");
 
     console.log("\nRefund failure rolls everything back");
     const noLedgerEmp = await Employee.create({ employeeId: "EMP-VERIFY-NL", employeeName: "No Store", role: "Cashier" });
