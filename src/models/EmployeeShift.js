@@ -4,7 +4,9 @@ const sequelize = require("../database");
 const SHIFT_STATUSES = ["Draft", "Published", "Completed", "Cancelled"];
 
 class EmployeeShift extends Model {
-  // Check the shift is valid: Sequelize's field checks, then end time after start time.
+  // +validate() : Boolean
+  // Check the shift is valid: Sequelize's field checks, then {startTime < endTime}.
+  // Returns true when valid; throws an error that explains the problem otherwise.
   async validate(options) {
     await super.validate(options);
 
@@ -17,12 +19,30 @@ class EmployeeShift extends Model {
     return true;
   }
 
-  // Change the start and end time, check the shift, then save it.
+  // +updateShift(startTime : Time, endTime : Time) : Boolean
+  // Change the start and end time, check the shift with validate(), and save it.
+  // Returns isValid, as in the sequence diagrams: true when the shift was saved;
+  // false when the times are invalid (sub-flow 8a), in which case the old times are
+  // put back, nothing is saved, and the reason is kept in validationMessage.
   async updateShift(startTime, endTime) {
+    const oldStart = this.previous("startTime") ?? this.startTime;
+    const oldEnd = this.previous("endTime") ?? this.endTime;
+
     this.startTime = startTime;
     this.endTime = endTime;
-    await this.validate();
-    return this.save();
+
+    try {
+      await this.validate();
+    } catch (error) {
+      this.startTime = oldStart;
+      this.endTime = oldEnd;
+      this.validationMessage = error.message;
+      return false;
+    }
+
+    this.validationMessage = null;
+    await this.save();
+    return true;
   }
 }
 

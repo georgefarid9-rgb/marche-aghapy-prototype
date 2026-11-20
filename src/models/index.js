@@ -152,36 +152,40 @@ Employee.belongsTo(Store, {
   as: "store",
 });
 
+// ----- Feature 5 - Employee Management and Scheduling -----
+// Each schedule belongs to exactly one store, and each shift belongs to exactly one
+// schedule and one employee ([1..1] in the class diagram), so these keys are required.
+
 // Store 1 ---- 0..* Schedule (has)
 Store.hasMany(Schedule, {
-  foreignKey: "storeId",
+  foreignKey: { name: "storeId", allowNull: false },
   as: "schedules",
 });
 
 Schedule.belongsTo(Store, {
-  foreignKey: "storeId",
+  foreignKey: { name: "storeId", allowNull: false },
   as: "store",
 });
 
 // Employee 1 ---- 0..* EmployeeShift (works)
 Employee.hasMany(EmployeeShift, {
-  foreignKey: "employeeId",
+  foreignKey: { name: "employeeId", allowNull: false },
   as: "shifts",
 });
 
 EmployeeShift.belongsTo(Employee, {
-  foreignKey: "employeeId",
+  foreignKey: { name: "employeeId", allowNull: false },
   as: "employee",
 });
 
 // Schedule 1 <>---- 0..* EmployeeShift (contains, aggregation)
 Schedule.hasMany(EmployeeShift, {
-  foreignKey: "scheduleId",
+  foreignKey: { name: "scheduleId", allowNull: false },
   as: "shifts",
 });
 
 EmployeeShift.belongsTo(Schedule, {
-  foreignKey: "scheduleId",
+  foreignKey: { name: "scheduleId", allowNull: false },
   as: "schedule",
 });
 

@@ -63,6 +63,24 @@ To check Feature 3, run `npm run profiles:check` on a newly seeded database. To 
 - Validate shift information.
 - Publish and view employee schedules.
 
+**Prototype 2 update (matches the combined class diagram, the Milestone 4 Feature 5 sequence diagrams and the Milestone 5 implementation class diagram):**
+
+| Class | Attributes | Methods |
+|---|---|---|
+| Schedule | scheduleId, startDate, endDate `{startDate <= endDate}`, store [1..1], shifts [0..*] | addShift(shift) : void, displayShifts() : EmployeeShift[], findShift(shiftId) : EmployeeShift, save() : void |
+| EmployeeShift | shiftId, shiftDate, startTime, endTime `{startTime < endTime}`, shiftStatus, schedule [1..1], employee [1..1] | validate() : Boolean, updateShift(startTime, endTime) : Boolean |
+| Employee | employeeId, employeeName, phoneNumber (required), email [0..1], role, shifts [0..*] | viewSchedule() : EmployeeShift[] |
+| StoreOwner | (Feature 5 methods) | editShift(shift) : Boolean, publishSchedule(schedule) : void |
+| Store | storeId, storeName, address (required), employees, schedules | listEmployees() : Employee[], findEmployee(employeeId) : Employee |
+
+- `Store.listEmployees()` and `Store.findEmployee()` added (sequence diagram steps 1-3); `findEmployee()` returns `null` for alternate flow 3a.
+- `findShift()` added; returns `null` when the shift is not in that schedule (alternate flow 5a).
+- A schedule whose start date is after its end date is rejected.
+- `editShift(aShift)` now takes only the shift (with its new times already set) and returns `isValid` from `updateShift()`: `true` when saved, `false` when the times are invalid (sub-flow 8a). On `false` the old times are kept and the reason is in `shift.validationMessage`.
+- `publishSchedule()` checks every shift first and publishes all of them in one transaction, or none.
+- A shift must have an employee and a schedule, a schedule must have a store, and an employee must have a phone number, and a store must have an address.
+- Run `npm run scheduling:check` on a newly set-up database to verify all of the above.
+
 ### Feature 6 — Customer Support
 
 - Retrieve customer information and purchase history.

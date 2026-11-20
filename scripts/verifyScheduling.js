@@ -78,6 +78,14 @@ async function verifyScheduling() {
     assert.ok(schedule.shifts.length >= 2, "SCH-001 should contain the 2 sample shifts.");
     console.log("Store, owner, employees and schedule found.");
 
+    // Sequence diagram steps 1-3: Store.listEmployees() and Store.findEmployee().
+    const listed = await store.listEmployees();
+    assert.ok(listed.length >= 2, "listEmployees() should return the store's employees.");
+    const foundEmployee = await store.findEmployee("EMP-001");
+    assert.ok(foundEmployee, "findEmployee() did not find EMP-001.");
+    assert.equal(await store.findEmployee("EMP-NOPE"), null, "findEmployee() should return null (alternate flow 3a).");
+    console.log("listEmployees() and findEmployee(): employees listed, EMP-001 found, unknown employee returned null.");
+
     // Everything below changes data, so save the shifts first.
     snapshot = await snapshotShifts("SCH-001");
     const startingCount = snapshot.length;
@@ -133,14 +141,53 @@ async function verifyScheduling() {
     assert.equal(await EmployeeShift.findByPk("SHIFT-OUT"), null, "Out-of-period shift was saved.");
     console.log("addShift(): shift outside the schedule period was rejected.");
 
-    // 5. StoreOwner.editShift() changes a shift's hours.
-    await owner.editShift(await EmployeeShift.findByPk("SHIFT-002"), "13:00:00", "21:00:00");
+    // 5. Schedule.findShift() finds a shift in this schedule, and returns null otherwise.
+    const found = await schedule.findShift("SHIFT-002");
+    assert.ok(found, "findShift() did not find SHIFT-002 in SCH-001.");
+    assert.equal(found.scheduleId, "SCH-001");
+    assert.equal(await schedule.findShift("SHIFT-NOPE"), null, "findShift() should return null for an unknown shift.");
+    console.log("findShift(): SHIFT-002 found; unknown shift returned null.");
+
+    // 6. StoreOwner.editShift(shift) saves the new hours and returns true.
+    const toEdit = await schedule.findShift("SHIFT-002");
+    toEdit.startTime = "13:00:00";
+    toEdit.endTime = "21:00:00";
+    assert.equal(await owner.editShift(toEdit), true, "editShift() should return true.");
     const edited = await EmployeeShift.findByPk("SHIFT-002");
     assert.equal(edited.startTime, "13:00:00");
     assert.equal(edited.endTime, "21:00:00");
     console.log("editShift(): SHIFT-002 changed to 13:00-21:00.");
 
-    // 6. StoreOwner.publishSchedule() publishes every shift in the schedule.
+    // 7. editShift() rejects invalid hours, saves nothing and keeps the old hours.
+    edited.startTime = "22:00:00";
+    edited.endTime = "06:00:00";
+    assert.equal(await owner.editShift(edited), false, "editShift() should return false (isValid) for invalid hours.");
+    assert.match(edited.validationMessage, /must be after start time/);
+    assert.equal(edited.startTime, "13:00:00", "Invalid edit left the bad start time on the shift.");
+    const stillSaved = await EmployeeShift.findByPk("SHIFT-002");
+    assert.equal(stillSaved.startTime, "13:00:00");
+    assert.equal(stillSaved.endTime, "21:00:00");
+    console.log("editShift(): invalid hours returned false (sub-flow 8a); old hours kept.");
+
+    // 8. EmployeeShift.updateShift() returns true.
+    assert.equal(await edited.updateShift("12:00:00", "20:00:00"), true, "updateShift() should return true.");
+    console.log("updateShift(): returned true.");
+
+    // 9. publishSchedule() publishes nothing if any shift in the schedule is invalid.
+    await sequelize.query(
+      "UPDATE employee_shifts SET startTime = '18:00:00', endTime = '10:00:00' WHERE shiftId = 'SHIFT-003'"
+    );
+    await assert.rejects(owner.publishSchedule(schedule), /must be after start time/);
+    assert.ok(
+      (await schedule.displayShifts()).every((s) => s.shiftStatus === "Draft"),
+      "publishSchedule() published some shifts even though one shift was invalid."
+    );
+    await sequelize.query(
+      "UPDATE employee_shifts SET startTime = '09:00:00', endTime = '17:00:00' WHERE shiftId = 'SHIFT-003'"
+    );
+    console.log("publishSchedule(): nothing published while one shift was invalid.");
+
+    // 10. StoreOwner.publishSchedule() publishes every shift in the schedule.
     await owner.publishSchedule(schedule);
     const published = await schedule.displayShifts();
     assert.ok(
@@ -149,7 +196,7 @@ async function verifyScheduling() {
     );
     printShifts("displayShifts() after publishSchedule():", published);
 
-    // 7. Employee.viewSchedule() returns only that employee's shifts.
+    // 11. Employee.viewSchedule() returns only that employee's shifts.
     const ownShifts = await cashier.viewSchedule();
     assert.ok(ownShifts.length > 0, "EMP-001 has no shifts.");
     assert.ok(
@@ -159,7 +206,42 @@ async function verifyScheduling() {
     assert.ok(ownShifts.some((s) => s.shiftId === "SHIFT-003"), "viewSchedule() is missing SHIFT-003.");
     printShifts("viewSchedule() for EMP-001:", ownShifts);
 
-    // 8. Put the sample data back and check nothing was left changed.
+    // 12. Class-diagram rules checked without saving anything:
+    //     {startDate <= endDate}, shift needs an employee and a schedule,
+    //     employee needs a phone number.
+    await assert.rejects(
+      Schedule.build({ scheduleId: "SCH-BAD", startDate: "2026-11-10", endDate: "2026-11-02", storeId: "STORE-001" }).validate(),
+      /must be on or before end date/
+    );
+    console.log("Schedule: start date after end date was rejected.");
+
+    await assert.rejects(
+      EmployeeShift.build({ shiftId: "SHIFT-X", shiftDate: "2026-11-03", startTime: "09:00:00", endTime: "17:00:00", scheduleId: "SCH-001" }).validate(),
+      /employeeId cannot be null/
+    );
+    await assert.rejects(
+      EmployeeShift.build({ shiftId: "SHIFT-X", shiftDate: "2026-11-03", startTime: "09:00:00", endTime: "17:00:00", employeeId: "EMP-001" }).validate(),
+      /scheduleId cannot be null/
+    );
+    await assert.rejects(
+      Schedule.build({ scheduleId: "SCH-X", startDate: "2026-11-02", endDate: "2026-11-08" }).validate(),
+      /storeId cannot be null/
+    );
+    console.log("EmployeeShift and Schedule: missing employee, schedule or store was rejected.");
+
+    await assert.rejects(
+      Employee.build({ employeeId: "EMP-X", employeeName: "No Phone", role: "Cashier", storeId: "STORE-001" }).validate(),
+      /phoneNumber cannot be null/
+    );
+    console.log("Employee: missing phone number was rejected.");
+
+    await assert.rejects(
+      Store.build({ storeId: "STORE-X", storeName: "No Address", ownerId: "OWN-001" }).validate(),
+      /address cannot be null/
+    );
+    console.log("Store: missing address was rejected.");
+
+    // 13. Put the sample data back and check nothing was left changed.
     await restoreShifts(snapshot);
     const restored = await snapshotShifts("SCH-001");
     assert.deepEqual(
