@@ -54,9 +54,12 @@ class StoreOwner extends Model {
 
   // +publishSchedule(schedule : Schedule) : void
   // Publish a schedule so employees can see their shifts. Every shift is checked
-  // first; if any shift is invalid, nothing is published.
+  // first; if any shift is invalid, nothing is published. Cancelled and completed
+  // shifts keep their status.
   async publishSchedule(schedule) {
-    const shifts = await schedule.displayShifts();
+    const shifts = (await schedule.displayShifts()).filter(
+      (shift) => shift.shiftStatus === "Draft" || shift.shiftStatus === "Published"
+    );
 
     for (const shift of shifts) {
       await shift.validate();

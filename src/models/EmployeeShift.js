@@ -3,6 +3,9 @@ const sequelize = require("../database");
 
 const SHIFT_STATUSES = ["Draft", "Published", "Completed", "Cancelled"];
 
+// Statuses an employee can see in their own schedule (after the owner publishes).
+const VISIBLE_TO_EMPLOYEE = ["Published", "Completed"];
+
 class EmployeeShift extends Model {
   // +validate() : Boolean
   // Check the shift is valid: Sequelize's field checks, then {startTime < endTime}.
@@ -44,6 +47,21 @@ class EmployeeShift extends Model {
     await this.save();
     return true;
   }
+
+  // +cancelShift() : Boolean
+  // Mark the shift as Cancelled so it no longer appears in the employee's schedule.
+  // Returns false (and changes nothing) if the shift was already completed or cancelled.
+  async cancelShift() {
+    if (this.shiftStatus === "Completed" || this.shiftStatus === "Cancelled") {
+      this.validationMessage = `Shift ${this.shiftId} is already ${this.shiftStatus.toLowerCase()}.`;
+      return false;
+    }
+
+    this.shiftStatus = "Cancelled";
+    this.validationMessage = null;
+    await this.save();
+    return true;
+  }
 }
 
 EmployeeShift.init(
@@ -69,6 +87,12 @@ EmployeeShift.init(
       allowNull: false,
     },
 
+    // -role[0..1] : String  (use case step 7: the role worked on this shift, e.g. Cashier)
+    role: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+
     shiftStatus: {
       type: DataTypes.STRING,
       allowNull: false,
@@ -85,5 +109,8 @@ EmployeeShift.init(
     timestamps: false,
   }
 );
+
+EmployeeShift.SHIFT_STATUSES = SHIFT_STATUSES;
+EmployeeShift.VISIBLE_TO_EMPLOYEE = VISIBLE_TO_EMPLOYEE;
 
 module.exports = EmployeeShift;
