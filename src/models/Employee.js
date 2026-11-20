@@ -2,6 +2,9 @@ const { Model, DataTypes } = require("sequelize");
 const sequelize = require("../database");
 
 class Employee extends Model {
+  // ----- Feature 5 (Employee Management / Scheduling) -----
+
+  // +viewSchedule() : EmployeeShift[]
   // Return this employee's shifts, ordered by date and start time.
   async viewSchedule() {
     return this.getShifts({
@@ -103,9 +106,10 @@ Employee.init(
       allowNull: false,
     },
 
+    // -phoneNumber[1..1] : String
     phoneNumber: {
       type: DataTypes.STRING,
-      allowNull: true,
+      allowNull: false,
     },
 
     email: {

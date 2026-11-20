@@ -42,22 +42,35 @@ class StoreOwner extends Model {
 
   // ----- Feature 5 (Employee Management / Scheduling) -----
 
-  // Change the start and end time of an existing shift.
-  async editShift(shift, startTime, endTime) {
-    return shift.updateShift(startTime, endTime);
+  // +editShift(shift : EmployeeShift) : Boolean
+  // Sequence diagram: editShift(aShift) -> aShift.updateShift(startTime, endTime)
+  // -> validate() -> isValid. The owner sets the new start and/or end time on the
+  // shift (in the edit form), then calls editShift(shift). Returns isValid: true when
+  // saved, false when the times are invalid (sub-flow 8a: the owner corrects the
+  // shift and calls editShift again).
+  async editShift(shift) {
+    return shift.updateShift(shift.startTime, shift.endTime);
   }
 
-  // Publish a schedule so employees can see their shifts.
+  // +publishSchedule(schedule : Schedule) : void
+  // Publish a schedule so employees can see their shifts. Every shift is checked
+  // first; if any shift is invalid, nothing is published. Cancelled and completed
+  // shifts keep their status.
   async publishSchedule(schedule) {
-    const shifts = await schedule.displayShifts();
+    const shifts = (await schedule.displayShifts()).filter(
+      (shift) => shift.shiftStatus === "Draft" || shift.shiftStatus === "Published"
+    );
 
     for (const shift of shifts) {
       await shift.validate();
-      shift.shiftStatus = "Published";
-      await shift.save();
     }
 
-    return shifts;
+    await sequelize.transaction(async (transaction) => {
+      for (const shift of shifts) {
+        shift.shiftStatus = "Published";
+        await shift.save({ transaction });
+      }
+    });
   }
 
   // ----- Feature 3 (Supplier & Customer Profile Management) -----
