@@ -1,6 +1,7 @@
 const { Model, DataTypes } = require("sequelize");
 const sequelize = require("../database");
 const { today } = require("../utils/dates");
+const { guardMethods } = require("../utils/supportGuard");
 
 // Shared sales classes (used by Feature 6 - Customer Support for returns and refunds).
 // A Sale is made up of one or more SaleItems (composition).
@@ -98,5 +99,11 @@ Sale.init(
     timestamps: false,
   }
 );
+
+guardMethods(Sale, {
+  addItem: { action: "adding the item to the sale" },
+  removeItem: { action: "removing the item from the sale" },
+  recalculateTotal: { action: "recalculating the sale total" },
+});
 
 module.exports = Sale;

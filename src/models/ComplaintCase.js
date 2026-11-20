@@ -1,5 +1,6 @@
 const { Model, DataTypes } = require("sequelize");
 const sequelize = require("../database");
+const { guardMethods } = require("../utils/supportGuard");
 
 // Feature 6 - Customer Support
 // A complaint raised by a customer and opened by an employee.
@@ -95,5 +96,12 @@ ComplaintCase.init(
 );
 
 ComplaintCase.CASE_STATUSES = CASE_STATUSES;
+
+// Turn unexpected failures into a clear "something went wrong, try again" error.
+guardMethods(ComplaintCase, {
+  createCase: { action: "opening the complaint case" },
+  setStatus: { action: "changing the case status" },
+  escalateToOwner: { action: "sending the case to the store owner" },
+});
 
 module.exports = ComplaintCase;

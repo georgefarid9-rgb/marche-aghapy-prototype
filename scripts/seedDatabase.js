@@ -18,6 +18,7 @@ const {
   ComplaintCase,
   SupportRequest,
   ReturnRequest,
+  Ledger,
 } = require("../src/models");
 
 async function seedDatabase() {
@@ -205,6 +206,16 @@ async function seedDatabase() {
     // addItem() also recalculates the sale total: 3 x 2.50 = 7.50.
     const sale = await Sale.findByPk("SALE-001");
     await sale.addItem({ productId: "PROD-001", quantity: 3, unitPrice: 2.5 });
+
+    // Refunds are posted to the store's ledger (Feature 4). Create one only if no
+    // other feature's seed data already made it.
+    if (!(await Ledger.findOne({ where: { storeId: "STORE-001" } }))) {
+      await Ledger.create({
+        ledgerId: "LEDGER-001",
+        periodStartDate: today,
+        storeId: "STORE-001",
+      });
+    }
 
     await SupportRequest.create({
       requestId: "REQ-001",
