@@ -351,7 +351,7 @@ async function verifyCustomerSupport() {
     check((await amtExact.processRefund()) === true, "the exact amount (3.00) is refunded");
 
     console.log("\nRefund failure rolls everything back");
-    const noLedgerEmp = await Employee.create({ employeeId: "EMP-VERIFY-NL", employeeName: "No Store", role: "Cashier" });
+    const noLedgerEmp = await Employee.create({ employeeId: "EMP-VERIFY-NL", employeeName: "No Store", phoneNumber: "514-555-0100", role: "Cashier" });
     const rbReturn = await ReturnRequest.create({
       returnId: "RET-VERIFY-RB", reason: "Verification", amount: 3, quantity: 1, saleItemId: line.saleItemId,
       customerId: CUSTOMER_ID, saleId: "SALE-VERIFY-LINE", employeeId: noLedgerEmp.employeeId,
