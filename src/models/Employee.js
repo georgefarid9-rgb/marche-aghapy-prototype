@@ -36,6 +36,11 @@ class Employee extends Model {
     const customer = await this.searchAccount(customerId);
     const where = { customerId };
 
+    // Employee.customers: remember that this employee has assisted this customer.
+    if (customer) {
+      await this.addCustomer(customer);
+    }
+
     return {
       customer,
       missingRecord: customer === null,

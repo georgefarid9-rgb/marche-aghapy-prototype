@@ -35,6 +35,7 @@ const REQUEST_IDS = ["REQ-VERIFY-1"];
 const SALE_IDS = ["SALE-VERIFY-OLD", "SALE-VERIFY-FUTURE", "SALE-VERIFY-CONC", "SALE-VERIFY-WALKIN", "SALE-VERIFY-LINE", "SALE-VERIFY-RB", "SALE-VERIFY-AMT"];
 const createdRequestIds = [];
 let tempLedgerId = null;
+let linkToRemove = null; // Employee-Customer link created by this script (removed again at the end)
 
 let failures = 0;
 
@@ -68,6 +69,9 @@ async function removeVerifyData() {
   });
   await Transaction.destroy({ where: { transactionId: returns.map((r) => `REF-${r.returnId}`) } });
   await ReturnRequest.destroy({ where: { returnId: returns.map((r) => r.returnId).filter((id) => id !== "RET-001") } });
+  if (linkToRemove) {
+    await sequelize.models.EmployeeCustomer.destroy({ where: linkToRemove });
+  }
   await Employee.destroy({ where: { employeeId: "EMP-VERIFY-NL" } });
   await SupportRequest.destroy({ where: { requestId: createdRequestIds } });
   await ComplaintCase.destroy({ where: { caseId: CASE_IDS } });
@@ -126,10 +130,19 @@ async function verifyCustomerSupport() {
 
     // ---- Steps 2-4: look up the account and review the records ----
     console.log("\nSteps 2-4: Employee.assistCustomer()");
+    const EmployeeCustomer = sequelize.models.EmployeeCustomer;
+    const linkWhere = { employeeId: employee.employeeId, customerId: CUSTOMER_ID };
+    if ((await EmployeeCustomer.count({ where: linkWhere })) === 0) {
+      linkToRemove = linkWhere; // only remove the link if this script created it
+    }
     const help = await employee.assistCustomer(CUSTOMER_ID);
     check(help.missingRecord === false && help.customer?.customerId === CUSTOMER_ID, "customer record is found");
     check(help.purchaseHistory.length >= 1 && help.purchaseHistory[0].items.length >= 1, "purchases and their items are retrieved");
     check(help.supportRequests.length >= 1, "support requests are retrieved");
+    check((await employee.countCustomers({ where: { customerId: CUSTOMER_ID } })) === 1, "Employee.customers: the assisted customer is linked to the employee");
+    await employee.assistCustomer(CUSTOMER_ID);
+    check((await EmployeeCustomer.count({ where: linkWhere })) === 1, "assisting the same customer again does not add a second link");
+    check((await (await Customer.findByPk(CUSTOMER_ID)).getEmployees()).some((e) => e.employeeId === employee.employeeId), "Customer.employees shows the same link from the other side");
 
     console.log("\nAlternate flow 3a: missing customer record");
     const missing = await employee.assistCustomer("CUST-DOES-NOT-EXIST");
@@ -289,6 +302,19 @@ async function verifyCustomerSupport() {
       refundTx.length === 1 && refundTx[0].amount === 3 && refundTx[0].category === "Refund" && refundTx[0].ledgerId === ledger.ledgerId,
       "exactly one Refund entry of 3.00 was added to the ledger for this return"
     );
+
+    // ReturnRequest.ledger and Ledger.returnRequests
+    const refundedReturn = await ReturnRequest.findByPk(firstReturn.returnId);
+    check(refundedReturn.ledgerId === ledger.ledgerId, "ReturnRequest.ledger: the refunded return points to the ledger it was posted to");
+    check((await refundedReturn.getLedger()).ledgerId === ledger.ledgerId, "return.getLedger() returns that ledger");
+    check((await ledger.getReturnRequests()).some((r) => r.returnId === firstReturn.returnId), "Ledger.returnRequests lists the refunded return");
+
+    // Sale.getSale()
+    const loadedSale = await (await Sale.findByPk("SALE-VERIFY-LINE")).getSale();
+    check(loadedSale.saleId === "SALE-VERIFY-LINE" && loadedSale.items.length === 1 && loadedSale.items[0].returnedQuantity === 1, "Sale.getSale() reloads the sale with its lines and the current returnedQuantity");
+    check(loadedSale.returnRequests.some((r) => r.returnId === firstReturn.returnId), "Sale.getSale() also loads the sale's return requests");
+    await checkThrows(() => new Sale({ saleId: "SALE-DOES-NOT-EXIST" }).getSale(), "was not found", "Sale.getSale() reports a sale that does not exist");
+
 
     check((await employee.requestReturn(CUSTOMER_ID, "SALE-VERIFY-LINE", line.saleItemId, 3)).refunded === true, "returning the other 3 units is refunded");
     const fifth = await employee.requestReturn(CUSTOMER_ID, "SALE-VERIFY-LINE", line.saleItemId, 1);

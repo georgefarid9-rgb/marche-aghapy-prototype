@@ -158,6 +158,8 @@ class ReturnRequest extends Model {
           });
           refund.validateTransaction();
           await refund.save({ transaction });
+          // ReturnRequest.ledger: remember which ledger the refund was posted to.
+          this.ledgerId = ledger.ledgerId;
         }
 
         this.status = isEligible ? "Refunded" : "Rejected";
@@ -231,7 +233,7 @@ ReturnRequest.init(
       validate: { min: 1 },
     },
 
-    // customerId, saleId, saleItemId and employeeId are added by the associations in models/index.js.
+    // customerId, saleId, saleItemId, employeeId and ledgerId are added by the associations in models/index.js.
   },
   {
     sequelize,

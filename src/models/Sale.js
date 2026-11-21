@@ -40,6 +40,19 @@ class Sale extends Model {
     return removed;
   }
 
+  // +getSale() : Sale
+  // Reload this sale from the database with its lines and its return requests, so the
+  // caller sees the latest returnedQuantity values. Returns the sale itself.
+  async getSale() {
+    const fresh = await Sale.findByPk(this.saleId, {
+      include: [{ association: "items" }, { association: "returnRequests" }],
+    });
+    if (!fresh) {
+      throw new Error(`Sale ${this.saleId} was not found.`);
+    }
+    return fresh;
+  }
+
   // Set totalAmount to the sum of quantity x unitPrice over every line, then save.
   async recalculateTotal() {
     const items = await this.getItems();
@@ -101,6 +114,7 @@ Sale.init(
 );
 
 guardMethods(Sale, {
+  getSale: { action: "loading the sale", retry: true },
   addItem: { action: "adding the item to the sale" },
   removeItem: { action: "removing the item from the sale" },
   recalculateTotal: { action: "recalculating the sale total" },
