@@ -108,6 +108,17 @@ Ledger.belongsTo(Store, {
   as: "store",
 });
 
+// Ledger contains return requests
+Ledger.hasMany(ReturnRequest, {
+  foreignKey: "ledgerId",
+  as: "returnRequests",
+});
+
+ReturnRequest.belongsTo(Ledger, {
+  foreignKey: "ledgerId",
+  as: "ledger",
+});
+
 
 Ledger.hasMany(FinancialReport, {
   foreignKey: "ledgerId",
@@ -117,6 +128,17 @@ Ledger.hasMany(FinancialReport, {
 FinancialReport.belongsTo(Ledger, {
   foreignKey: "ledgerId",
   as: "ledger",
+});
+
+// StoreOwner reviews financial reports
+StoreOwner.hasMany(FinancialReport, {
+  foreignKey: "reviewedBy",
+  as: "financialReports",
+});
+
+FinancialReport.belongsTo(StoreOwner, {
+  foreignKey: "reviewedBy",
+  as: "reviewer",
 });
 
 
@@ -139,6 +161,11 @@ Transaction.belongsTo(Supplier, {
 Transaction.belongsTo(BudgetThreshold, {
   foreignKey: "budgetThresholdId",
   as: "budgetThreshold",
+});
+
+BudgetThreshold.hasMany(Transaction, {
+  foreignKey: "budgetThresholdId",
+  as: "expenses",
 });
 
 // Store 1 ---- 1..* Employee (employs)

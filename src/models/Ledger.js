@@ -1,5 +1,5 @@
 
-const { Model, DataTypes } = require("sequelize");
+const { Model, DataTypes, Op } = require("sequelize");
 const sequelize = require("../database");
 
 class Ledger extends Model {
@@ -45,6 +45,31 @@ class Ledger extends Model {
     await this.save();
 
     return balance;
+  }
+
+  async getTransactions(periodStart, periodEnd) {
+    const Transaction = require("./Transaction");
+
+    const where = {
+      ledgerId: this.ledgerId,
+    };
+
+    if (periodStart || periodEnd) {
+      where.date = {};
+
+      if (periodStart) {
+        where.date[Op.gte] = periodStart;
+      }
+
+      if (periodEnd) {
+        where.date[Op.lte] = periodEnd;
+      }
+    }
+
+    return Transaction.findAll({
+      where,
+      order: [["date", "ASC"]],
+    });
   }
 
   async getSummary() {

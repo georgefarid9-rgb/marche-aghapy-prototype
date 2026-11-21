@@ -17,6 +17,21 @@ class Expense extends Transaction {
 
     return new Date(this.dueDate) < new Date(currentDate);
   }
+
+  validate() {
+    try {
+      this.validateTransaction();
+      this.categorize();
+
+      return this.transactionType === "Expense";
+    } catch (error) {
+      return false;
+    }
+  }
+
+  isOverdue(currentDate = new Date()) {
+    return this.flagOverdue(currentDate);
+  }
 }
 
 module.exports = Expense;
