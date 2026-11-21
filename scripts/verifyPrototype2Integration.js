@@ -23,6 +23,13 @@ const scripts = [
   "verifyInventoryController.js",
   "verifyInventoryPage.js",
 
+
+  // Additional Feature 1 regression checks.
+  // These scripts each use a separate temporary database.
+  "verifyInventoryControllerRollback.js",
+  "verifyPendingRestockAlerts.js",
+  "verifyProductInventoryTransactions.js",
+
   // Regression checks already used by the whole team.
   "testDatabase.js",
   "verifyPrototype.js",
