@@ -102,6 +102,7 @@ async function runTests() {
     await Product.create({
       productId: "TEST-INV-PRODUCT-2",
       productName: "Egyptian Lentils",
+      category: "Canned Foods",
     });
 
     const newRecord = InventoryRecord.build();

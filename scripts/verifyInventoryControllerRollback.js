@@ -47,6 +47,7 @@ async function runTests() {
       JSON.stringify({
         productId: "ROLL-P1",
         productName: "Original Product",
+        category: "Canned Foods",
         inventoryId: "ROLL-I1",
         quantityOnHand: 20,
         reorderLevel: 10,
@@ -71,6 +72,7 @@ async function runTests() {
           JSON.stringify({
             productId: "ROLL-P2",
             productName: "Failed Inventory Product",
+            category: "Canned Foods",
             inventoryId: "ROLL-I2",
             quantityOnHand: 15,
             reorderLevel: 5,
@@ -136,6 +138,7 @@ async function runTests() {
           JSON.stringify({
             productId: "ROLL-P3",
             productName: "Low Stock Product",
+            category: "Canned Foods",
             inventoryId: "ROLL-I3",
             quantityOnHand: 2,
             reorderLevel: 10,

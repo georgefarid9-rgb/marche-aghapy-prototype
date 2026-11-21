@@ -50,8 +50,8 @@ class Product extends Model {
       productData.productName.trim().length > 0 &&
       (productData.description == null ||
         typeof productData.description === "string") &&
-      (productData.category == null ||
-        typeof productData.category === "string")
+      typeof productData.category === "string" &&
+      productData.category.trim().length > 0
     );
   }
 
@@ -147,7 +147,10 @@ Product.init(
 
     category: {
       type: DataTypes.STRING,
-      allowNull: true,
+      allowNull: false,
+      validate: { notEmpty: true, notBlank(value) {
+        if (typeof value !== "string" || !value.trim()) throw new Error("Category is required.");
+      } },
     },
   },
   {

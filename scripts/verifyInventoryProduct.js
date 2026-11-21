@@ -46,4 +46,10 @@ assert.equal(typeof product.updateProductInformation, "function");
 // Check the returned product.
 assert.equal(product.getProductInformation(), product);
 
+
+for (const category of [null, "", "   ", 42]) {
+  assert.equal(product.validateProductInformation(JSON.stringify({ category })), false);
+}
+assert.equal(Product.build({ productId: "NO-CATEGORY", productName: "Test" }).validateProductInformation(), false);
+
 console.log("Product class tests passed.");

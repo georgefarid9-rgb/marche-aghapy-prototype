@@ -86,6 +86,7 @@ async function run() {
     page.formData = {
       productId: "PAGE-P1",
       productName: "Foul Medames",
+      category: "Canned Foods",
       supplierId: "PAGE-SUP-1",
       inventoryId: "PAGE-I1",
       quantityOnHand: 5,

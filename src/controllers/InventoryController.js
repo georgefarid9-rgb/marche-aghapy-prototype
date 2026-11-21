@@ -142,7 +142,7 @@ class InventoryController {
             productId: details.productId,
             productName: details.productName,
             description: details.description ?? null,
-            category: details.category ?? null,
+            category: details.category,
             supplierId: details.supplierId ?? null,
           });
 
@@ -308,7 +308,7 @@ class InventoryController {
 
       if (!sample.validateProductInformation(this.pendingData)) {
         this.lastError =
-          "A valid product ID and name are required.";
+          "A valid product ID, name, and category are required.";
         return false;
       }
 
@@ -384,7 +384,13 @@ class InventoryController {
       return false;
     }
 
-    for (const field of ["description", "category"]) {
+    if (hasOwn(details, "category") &&
+        (typeof details.category !== "string" || !details.category.trim())) {
+      this.lastError = "Category must be a non-empty string.";
+      return false;
+    }
+
+    for (const field of ["description"]) {
       if (
         hasOwn(details, field) &&
         details[field] !== null &&
