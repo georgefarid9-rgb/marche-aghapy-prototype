@@ -41,6 +41,16 @@ async function run() {
 
     const controller = new InventoryController();
 
+    for (const category of [undefined, null, "", "  ", 42]) {
+      const accepted = await controller.submitNewProduct(JSON.stringify({
+        productId: "INVALID", productName: "Invalid", inventoryId: "INVALID-I",
+        quantityOnHand: 1, category,
+      }));
+      assert.equal(accepted, false);
+    }
+    assert.equal(await Product.count(), 0);
+    assert.equal(await InventoryRecord.count(), 0);
+
     // Test 1: Record a product and its inventory.
     const created = await controller.submitNewProduct(JSON.stringify({
       productId: "CTRL-P1",
@@ -61,6 +71,10 @@ async function run() {
 
     // Test 2: Retrieve the selected product.
     controller.selectedProductId = "CTRL-P1";
+    for (const category of [null, "", "   ", 42]) {
+      assert.equal(await controller.submitUpdates(JSON.stringify({ category })), false);
+    }
+    assert.equal((await Product.findByPk("CTRL-P1")).category, "Canned Foods");
     const selected = await controller.retrieveSelectedProduct();
 
     assert.equal(selected.productName, "Foul Medames");
@@ -115,6 +129,7 @@ async function run() {
     const second = await controller.submitNewProduct(JSON.stringify({
       productId: "CTRL-P2",
       productName: "Egyptian Lentils",
+      category: "Canned Foods",
       supplierId: "CTRL-SUP-1",
       inventoryId: "CTRL-I2",
       quantityOnHand: 20,

@@ -34,6 +34,7 @@ async function runTests() {
       JSON.stringify({
         productId: "REFRESH-P1",
         productName: "Foul Medames",
+        category: "Canned Foods",
         inventoryId: "REFRESH-I1",
         quantityOnHand: 5,
         reorderLevel: 10,

@@ -55,7 +55,7 @@ async function run() {
       { type: QueryTypes.SELECT }
     );
     const available = new Set(names.map(({ name }) => name));
-    for (const required of ["inventory_records", "restock_alerts"]) {
+    for (const required of ["products", "inventory_records", "restock_alerts"]) {
       if (!available.has(required)) {
         throw new Error(`Required table missing: ${required}`);
       }
@@ -82,6 +82,28 @@ async function run() {
     await sequelize.transaction(async (transaction) => {
       const queryOptions = { transaction };
       const qi = sequelize.getQueryInterface();
+
+      // Preserve legacy products and enforce the category requirement without
+      // rebuilding a referenced SQLite table or disturbing its indexes and keys.
+      const productColumns = await qi.describeTable("products", queryOptions);
+      if (!productColumns.category) {
+        await sequelize.query(
+          "ALTER TABLE products ADD COLUMN category TEXT NOT NULL DEFAULT 'Uncategorized'",
+          queryOptions
+        );
+      } else {
+        await sequelize.query(
+          "UPDATE products SET category = 'Uncategorized' WHERE category IS NULL OR trim(category) = ''",
+          queryOptions
+        );
+      }
+      for (const operation of ["INSERT", "UPDATE OF category"]) {
+        const triggerName = operation === "INSERT" ? "products_category_required_insert" : "products_category_required_update";
+        await sequelize.query(`CREATE TRIGGER IF NOT EXISTS ${triggerName}
+          BEFORE ${operation} ON products
+          WHEN NEW.category IS NULL OR trim(NEW.category) = ''
+          BEGIN SELECT RAISE(ABORT, 'Product category is required'); END`, queryOptions);
+      }
 
       const inventoryColumns = await qi.describeTable("inventory_records", queryOptions);
       if (!inventoryColumns.inventoryStatus) {

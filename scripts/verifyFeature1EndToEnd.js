@@ -53,6 +53,7 @@ async function run() {
     page.formData = {
       productId,
       productName: "E2E Foul Medames",
+      category: "Canned Foods",
       supplierId: "SUP-001",
       inventoryId,
       quantityOnHand: 12,

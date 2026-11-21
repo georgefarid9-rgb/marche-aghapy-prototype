@@ -24,12 +24,14 @@ async function run() {
         const product = Product.build({
           productId: "TX-P1",
           productName: "Foul Medames",
+          category: "Canned Foods",
         });
 
         await product.recordNewProduct(
           JSON.stringify({
             productId: "TX-P1",
             productName: "Foul Medames",
+            category: "Canned Foods",
           }),
           { transaction }
         );
@@ -61,12 +63,14 @@ async function run() {
       const product = Product.build({
         productId: "TX-P2",
         productName: "Egyptian Lentils",
+        category: "Canned Foods",
       });
 
       await product.recordNewProduct(
         JSON.stringify({
           productId: "TX-P2",
           productName: "Egyptian Lentils",
+          category: "Canned Foods",
         }),
         { transaction }
       );

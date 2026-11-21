@@ -56,6 +56,12 @@ async function run() {
     }
 
     db = connect();
+    const products = await db.query("SELECT productId, category FROM products ORDER BY productId", { type: QueryTypes.SELECT });
+    assert.deepEqual(products.map(p => p.category), ["Uncategorized", "Uncategorized", "Uncategorized"]);
+    await assert.rejects(() => db.query("UPDATE products SET category = NULL WHERE productId = 'P1'"));
+    await assert.rejects(() => db.query("UPDATE products SET category = '  ' WHERE productId = 'P1'"));
+    console.log("PASS: Legacy categories backfilled and required");
+
     const inventory = await db.query(
       "SELECT inventoryId, inventoryStatus, quantityOnHand, expiryDate FROM inventory_records ORDER BY inventoryId",
       { type: QueryTypes.SELECT }
@@ -97,6 +103,28 @@ async function run() {
     );
     assert.equal(backups.length, 2);
     console.log("PASS: Each migration run created a database backup");
+    // Existing category columns may be nullable in older databases.
+    const nullablePath = path.join(directory, "nullable.sqlite");
+    const nullableDb = new Sequelize({ dialect: "sqlite", storage: nullablePath, logging: false });
+    await nullableDb.query("CREATE TABLE products (productId TEXT PRIMARY KEY, productName TEXT NOT NULL, category TEXT)");
+    await nullableDb.query("CREATE INDEX products_name_idx ON products(productName)");
+    await nullableDb.query("INSERT INTO products VALUES ('N1','Null',NULL),('N2','Blank','  '),('N3','Kept','Produce')");
+    await nullableDb.query("CREATE TABLE inventory_records (inventoryId TEXT PRIMARY KEY, quantityOnHand INTEGER, reorderLevel INTEGER)");
+    await nullableDb.query("CREATE TABLE restock_alerts (alertId TEXT PRIMARY KEY)");
+    await nullableDb.close();
+    execFileSync(process.execPath, [migration], { env: { ...process.env, SQLITE_PATH: nullablePath }, stdio: "inherit" });
+    const checkedDb = new Sequelize({ dialect: "sqlite", storage: nullablePath, logging: false });
+    try {
+      const rows = await checkedDb.query("SELECT category FROM products ORDER BY productId", { type: QueryTypes.SELECT });
+      assert.deepEqual(rows.map(row => row.category), ["Uncategorized", "Uncategorized", "Produce"]);
+      await assert.rejects(() => checkedDb.query("INSERT INTO products VALUES ('N4','Invalid',NULL)"));
+      await assert.rejects(() => checkedDb.query("UPDATE products SET category = '' WHERE productId = 'N3'"));
+      const indexes = await checkedDb.query("PRAGMA index_list('products')", { type: QueryTypes.SELECT });
+      assert.ok(indexes.some(index => index.name === "products_name_idx"));
+    } finally {
+      await checkedDb.close();
+    }
+    console.log("PASS: Nullable legacy categories backfilled; existing values and indexes preserved");
     console.log("\nAll Feature 1 migration tests passed.");
   } catch (error) {
     console.error("Feature 1 migration test failed:", error);
