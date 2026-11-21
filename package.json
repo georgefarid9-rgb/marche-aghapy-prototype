@@ -21,6 +21,7 @@
     "support:check": "node scripts/verifyCustomerSupport.js",
     "support:migrate": "node scripts/migrateFeature6Support.js",
     "support:migrate-refunds": "node scripts/migrateFeature6Refunds.js",
+    "support:migrate-links": "node scripts/migrateFeature6Prototype2.js",
     "support:migrate-check": "node scripts/verifyFeature6Migration.js"
   },
   "repository": {
