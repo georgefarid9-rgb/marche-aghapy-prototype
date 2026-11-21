@@ -4,22 +4,90 @@ const sequelize = require("../database");
 
 class Ledger extends Model {
   async addTransaction(transaction) {
-    if (!transaction || typeof transaction.validateTransaction !== "function") {
+    if (!transaction || typeof transaction.isValid !== "function") {
       throw new Error("A valid transaction is required.");
     }
 
-    transaction.validateTransaction();
+    if (!transaction.isValid()) {
+      throw new Error("Transaction validation failed.");
+    }
 
     if (!transaction.transactionId) {
       throw new Error("Transaction ID is required.");
     }
 
-    transaction.ledgerId = this.ledgerId;
-    await transaction.save();
+    if (!this.ledgerId) {
+      throw new Error("A valid ledger is required.");
+    }
 
-    await this.recalculateBalance();
+    const Transaction = require("./Transaction");
 
-    return transaction;
+    // Only Revenue transactions can be associated with a Sale.
+    const saleId =
+      transaction.transactionType === "Revenue"
+        ? transaction._saleId
+        : null;
+
+    await sequelize.transaction(async (dbTransaction) => {
+      const existingTransaction = await Transaction.findByPk(
+        transaction.transactionId,
+        { transaction: dbTransaction }
+      );
+
+      if (existingTransaction) {
+        throw new Error("A transaction with this ID already exists.");
+      }
+
+      // If a Sale was supplied, confirm it exists before saving.
+      let sale = null;
+
+      if (saleId) {
+        const Sale = require("./Sale");
+
+        sale = await Sale.findByPk(saleId, {
+          transaction: dbTransaction,
+        });
+
+        if (!sale) {
+          throw new Error(`Sale ${saleId} does not exist.`);
+        }
+      }
+
+      transaction.ledgerId = this.ledgerId;
+
+      // Save the accounting transaction.
+      await transaction.save({ transaction: dbTransaction });
+
+      // Link the saved Revenue transaction to its Sale.
+      if (sale) {
+        await sale.addRevenue(transaction, {
+          transaction: dbTransaction,
+        });
+      }
+
+      // Recalculate the balance using saved transactions.
+      const transactions = await Transaction.findAll({
+        where: { ledgerId: this.ledgerId },
+        transaction: dbTransaction,
+      });
+
+      let balance = 0;
+
+      for (const savedTransaction of transactions) {
+        const amount = Number(savedTransaction.amount);
+
+        if (savedTransaction.transactionType === "Revenue") {
+          balance += amount;
+        } else if (savedTransaction.transactionType === "Expense") {
+          balance -= amount;
+        }
+      }
+
+      this.currentBalance = balance;
+      await this.save({ transaction: dbTransaction });
+    });
+
+    // The contract specifies void: no value is returned.
   }
 
   async recalculateBalance() {

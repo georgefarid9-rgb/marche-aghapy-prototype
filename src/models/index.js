@@ -1,3 +1,4 @@
+
 const Supplier = require("./Supplier");
 const Product = require("./Product");
 const InventoryRecord = require("./InventoryRecord");
@@ -19,8 +20,7 @@ const ExpiryRestockReport = require("./ExpiryRestockReport");
 const ReportFilter = require("./ReportFilter");
 const ReportExport = require("./ReportExport");
 
-
- // Feature 4 - Accounting
+// Feature 4 - Accounting
 const Transaction = require("./Transaction");
 const Revenue = require("./Revenue");
 const Expense = require("./Expense");
@@ -54,7 +54,7 @@ Product.belongsTo(Supplier, {
 });
 
 
- // Product 1 ---- 1 InventoryRecord
+// Product 1 ---- 1 InventoryRecord
 Product.hasOne(InventoryRecord, {
   foreignKey: "productId",
   as: "inventoryRecord",
@@ -95,7 +95,7 @@ Store.belongsTo(StoreOwner, {
 });
 
 
- // ----- Feature 4 - Accounting -----
+// ----- Feature 4 - Accounting -----
 
 // Store maintains its ledger
 Store.hasOne(Ledger, {
@@ -166,6 +166,24 @@ Transaction.belongsTo(BudgetThreshold, {
 BudgetThreshold.hasMany(Transaction, {
   foreignKey: "budgetThresholdId",
   as: "expenses",
+});
+
+// Sale and Revenue are connected through the sale_revenues junction table.
+Sale.belongsToMany(Transaction, {
+  through: "sale_revenues",
+  foreignKey: "saleId",
+  otherKey: "transactionId",
+  as: "revenue",
+  scope: {
+    transactionType: "Revenue",
+  },
+});
+
+Transaction.belongsToMany(Sale, {
+  through: "sale_revenues",
+  foreignKey: "transactionId",
+  otherKey: "saleId",
+  as: "sales",
 });
 
 // Store 1 ---- 1..* Employee (employs)

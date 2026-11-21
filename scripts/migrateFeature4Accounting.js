@@ -5,16 +5,16 @@ const { DataTypes } = require("sequelize");
 const sequelize = require("../src/database");
 
 // Feature 4 migration.
-// Adds only missing accounting columns and preserves existing data.
+// Adds missing accounting columns and, when Feature 6 sales already exists,
+// creates the Sale-Revenue junction table.
 // Safe to run more than once.
 //
 // IMPORTANT:
 // - Creates a database backup before making changes.
 // - Does not reset or replace the database.
 // - Does not create or modify Feature 6 tables.
-// - New relationship columns are nullable at the SQLite level
-//   to support safe ALTER TABLE operations.
-//   Sequelize models enforce required values for new records.
+// - Skips sale_revenues when the sales table does not exist.
+// - Existing accounting records are preserved.
 
 async function migrateFeature4Accounting() {
   const queryInterface = sequelize.getQueryInterface();
@@ -84,7 +84,6 @@ async function migrateFeature4Accounting() {
     }
 
     // 1. Ledgers
-    // storeId links a ledger to its store.
     await addColumnIfMissing("ledgers", "storeId", {
       type: DataTypes.STRING,
       allowNull: true,
@@ -142,7 +141,83 @@ async function migrateFeature4Accounting() {
       },
     });
 
-    // Verify that all expected columns now exist.
+    // 4. Sale-Revenue relationship.
+    // This is an accounting-side junction table. Feature 6 owns the sales table.
+    const currentTables = await queryInterface.showAllTables();
+
+    if (!currentTables.includes("sales")) {
+      console.log(
+        "The sales table does not exist yet. Skipping sale_revenues creation."
+      );
+    } else {
+      const latestTables = await queryInterface.showAllTables();
+
+      if (!latestTables.includes("sale_revenues")) {
+        await queryInterface.createTable("sale_revenues", {
+          saleId: {
+            type: DataTypes.STRING,
+            allowNull: false,
+            primaryKey: true,
+            references: {
+              model: "sales",
+              key: "saleId",
+            },
+            onUpdate: "CASCADE",
+            onDelete: "CASCADE",
+          },
+
+          transactionId: {
+            type: DataTypes.STRING,
+            allowNull: false,
+            primaryKey: true,
+            references: {
+              model: "transactions",
+              key: "transactionId",
+            },
+            onUpdate: "CASCADE",
+            onDelete: "CASCADE",
+          },
+
+          createdAt: {
+            type: DataTypes.DATE,
+            allowNull: false,
+          },
+
+          updatedAt: {
+            type: DataTypes.DATE,
+            allowNull: false,
+          },
+        });
+
+        console.log("Created sale_revenues junction table.");
+      } else {
+        console.log("sale_revenues already exists. Skipping creation.");
+      }
+
+      // Verify the junction table matches the Sequelize association.
+      const junctionColumns = await queryInterface.describeTable(
+        "sale_revenues"
+      );
+
+      const expectedJunctionColumns = [
+        "saleId",
+        "transactionId",
+        "createdAt",
+        "updatedAt",
+      ];
+
+      for (const columnName of expectedJunctionColumns) {
+        if (!junctionColumns[columnName]) {
+          throw new Error(
+            `Verification failed: sale_revenues.${columnName} is missing.`
+          );
+        }
+      }
+
+      console.log("Sale-Revenue junction table verified.");
+    }
+
+    // 5. Verify all expected accounting columns.
     const expectedColumns = {
       ledgers: ["storeId"],
       transactions: [

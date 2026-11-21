@@ -12,7 +12,22 @@ class Transaction extends Model {
       throw new Error("Transaction date is required.");
     }
 
+    if (!["Revenue", "Expense"].includes(this.transactionType)) {
+      throw new Error("Transaction type must be Revenue or Expense.");
+    }
+
     return true;
+  }
+
+  // Boolean validation for the accounting contract.
+  // Kept separate from Sequelize's built-in validate() method.
+  isValid() {
+    try {
+      this.validateTransaction();
+      return true;
+    } catch (error) {
+      return false;
+    }
   }
 
   categorize() {

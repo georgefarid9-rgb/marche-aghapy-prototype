@@ -2,25 +2,28 @@
 const Transaction = require("./Transaction");
 
 class Revenue extends Transaction {
-  // Mark this transaction as revenue from a sale.
-  recordSale() {
+  // Mark this transaction as revenue and associate it with a sale.
+  recordSale(sale) {
     this.transactionType = "Revenue";
+
+    if (sale !== undefined && sale !== null) {
+      if (!sale.saleId) {
+        throw new Error("A valid sale with a saleId is required.");
+      }
+
+      // Keep the Sale ID for Ledger.addTransaction().
+      this._saleId = sale.saleId;
+    }
+
     return this;
   }
 
-  // UML requirement: validate() returns a Boolean.
-  validate() {
-    try {
-      this.validateTransaction();
-
-      if (this.transactionType !== "Revenue") {
-        return false;
-      }
-
-      return true;
-    } catch (error) {
-      return false;
-    }
+  // Boolean validation required by the accounting contract.
+  isValid() {
+    return (
+      super.isValid() &&
+      this.transactionType === "Revenue"
+    );
   }
 }
 

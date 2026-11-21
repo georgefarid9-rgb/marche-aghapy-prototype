@@ -18,12 +18,14 @@ class Expense extends Transaction {
     return new Date(this.dueDate) < new Date(currentDate);
   }
 
-  validate() {
+  // Boolean validation required by the accounting contract.
+  isValid() {
     try {
-      this.validateTransaction();
-      this.categorize();
-
-      return this.transactionType === "Expense";
+      return (
+        super.isValid() &&
+        this.transactionType === "Expense" &&
+        Boolean(this.categorize())
+      );
     } catch (error) {
       return false;
     }
