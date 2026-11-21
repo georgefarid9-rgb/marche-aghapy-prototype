@@ -120,6 +120,19 @@ FinancialReport.belongsTo(Ledger, {
   as: "ledger",
 });
 
+//
+// Feature 4 — Store owner reviews financial reports
+//
+StoreOwner.hasMany(FinancialReport, {
+  foreignKey: "reviewedBy",
+  as: "financialReports",
+});
+
+FinancialReport.belongsTo(StoreOwner, {
+  foreignKey: "reviewedBy",
+  as: "reviewer",
+});
+
 
 // Ledger contains transactions
 Ledger.hasMany(Transaction, {
@@ -141,6 +154,14 @@ Transaction.belongsTo(BudgetThreshold, {
   foreignKey: "budgetThresholdId",
   as: "budgetThreshold",
 });
+
+
+// Feature 4 — Budget threshold tracks related expenses
+BudgetThreshold.hasMany(Transaction, {
+  foreignKey: "budgetThresholdId",
+  as: "expenses",
+});
+
 
 // Store 1 ---- 1..* Employee (employs)
 Store.hasMany(Employee, {
