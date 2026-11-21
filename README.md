@@ -1,198 +1,131 @@
 # Marché Aghapy — Store Management System
 
 **Course:** BTM 495 — Systems Analysis and Design  
-**Project:** Prototype 1  
-**Project Name:** Marché Aghapy Store Management System
+**Project:** Prototype 2  
+**University:** Concordia University — John Molson School of Business  
+**Team:** Group 1
 
 ## 1. Project Overview
 
-Our project proposes a store management system for Marché Aghapy, a local grocery store in Montréal.
+The Marché Aghapy Store Management System is a university project developed to support the daily operations of Marché Aghapy, a local grocery store in Montréal, Quebec.
 
-The goal is to help the store manage its daily activities more efficiently by organizing information related to products, inventory, suppliers, customers, employees, sales, and accounting.
+The purpose of the proposed system is to improve how the store manages its products, inventory, suppliers, customers, employees, and financial information.
 
-For Prototype 1, our team developed the basic structure of the proposed system using JavaScript, Node.js, Sequelize, and SQLite.
+By organizing these activities within one system, the project aims to reduce manual work, improve information accuracy, and support better business decisions.
 
-The prototype demonstrates how the system's main components are organized, how information is stored in a database, and how different features can work together.
+## 2. Project Objectives
 
-**This is a functional technical prototype, not a complete website or application with a user interface.**
+The main objectives of the system are to:
 
-## 2. Features Developed
+- Improve product and inventory tracking.
+- Reduce stock shortages and identify products approaching their expiry dates.
+- Organize supplier and customer information.
+- Support financial tracking and reporting.
+- Simplify employee scheduling.
+- Improve customer service and complaint handling.
 
-Our system includes six main features.
+## 3. Main Features
+
+The system is divided into six main features.
 
 ### Feature 1 — Product and Inventory Management
 
-- Store product information.
-- Track product quantities and expiry dates.
-- Identify products with low inventory.
-- Record restocking alerts.
-- Connect products to suppliers.
+Supports the management of product information, inventory quantities, expiry dates, and restocking alerts. It helps the store identify products that need attention and maintain accurate inventory records.
 
 ### Feature 2 — Dashboard and Reports
 
-- Organize inventory and sales reports.
-- Store report information and filters.
-- Track report export details.
-- Calculate basic sales information.
+Provides the foundation for organizing sales, inventory, and expiry-related reports. The goal is to give the store owner a clearer view of business performance and important operational information.
 
-### Feature 3 — Supplier and Customer Profiles
+### Feature 3 — Supplier and Customer Profile Management
 
-- Store supplier and customer information.
-- Validate profile details before saving, and prevent duplicate supplier names and customer phone numbers (also enforced by the database).
-- Find and update business partner profiles: name, status, and supplier or customer contact details, lead time and payment terms.
-- Record supplier delivery performance, including unplanned deliveries without a purchase order.
-- Flag delivery discrepancies and unplanned deliveries, and store a notification in the store owner's inbox.
-- Supplier performance report: average lead time, on-time delivery rate and average fill rate.
-- Retrieve customer purchase history.
+Organizes supplier and customer information, including contact details and supplier performance records. It also supports customer purchase history and the identification of supplier delivery issues.
 
-To check Feature 3, run `npm run profiles:check` on a newly seeded database. To upgrade an existing database without losing data, run `npm run profiles:migrate` (it backs up the database first).
+### Feature 4 — Accounting Management
 
-### Feature 4 — Accounting
-
-- Record revenue and expenses.
-- Maintain a store ledger.
-- Calculate account balances.
-- Generate basic financial summaries.
-- Compare expenses against budget limits.
+Supports the recording of revenues and expenses, tracking financial transactions, monitoring account balances, and preparing financial summaries.
 
 ### Feature 5 — Employee Management and Scheduling
 
-- Store employee and store information.
-- Create employee schedules.
-- Add and edit work shifts.
-- Validate shift information.
-- Publish and view employee schedules.
-
-**Prototype 2 update (matches the combined class diagram, the Milestone 4 Feature 5 sequence diagrams and the Milestone 5 implementation class diagram):**
-
-| Class | Attributes | Methods |
-|---|---|---|
-| Schedule | scheduleId, startDate, endDate `{startDate <= endDate}`, store [1..1], shifts [0..*] | addShift(shift) : void, displayShifts() : EmployeeShift[], findShift(shiftId) : EmployeeShift, save() : void |
-| EmployeeShift | shiftId, shiftDate, startTime, endTime `{startTime < endTime}`, role [0..1], shiftStatus, schedule [1..1], employee [1..1] | validate() : Boolean, updateShift(startTime, endTime) : Boolean, cancelShift() : Boolean |
-| Employee | employeeId, employeeName, phoneNumber (required), email [0..1], role, shifts [0..*] | viewSchedule() : EmployeeShift[] |
-| StoreOwner | (Feature 5 methods) | editShift(shift) : Boolean, publishSchedule(schedule) : void |
-| Store | storeId, storeName, address (required), employees, schedules | listEmployees() : Employee[], findEmployee(employeeId) : Employee |
-
-- `Store.listEmployees()` and `Store.findEmployee()` added (sequence diagram steps 1-3); `findEmployee()` returns `null` for alternate flow 3a.
-- `findShift()` added; returns `null` when the shift is not in that schedule (alternate flow 5a).
-- A schedule whose start date is after its end date is rejected.
-- `editShift(aShift)` now takes only the shift (with its new times already set) and returns `isValid` from `updateShift()`: `true` when saved, `false` when the times are invalid (sub-flow 8a). On `false` the old times are kept and the reason is in `shift.validationMessage`.
-- `publishSchedule()` checks every shift first and publishes all of them in one transaction, or none.
-- A shift must have an employee and a schedule, a schedule must have a store, and an employee must have a phone number, and a store must have an address.
-- Run `npm run scheduling:check` on a newly set-up database to verify all of the above.
-
-**Feature 5 is fully functional through `SchedulePage` (boundary) and `ScheduleController` (controller):**
-
-| Use case 05 step | SchedulePage method | Controller → domain calls (sequence diagram order) |
-|---|---|---|
-| 1-2 Open the scheduling dashboard | `openSchedulingDashboard()` | `Store.listEmployees()`, store schedules |
-| 3 Select an employee (3a: not found → error) | `selectEmployee(employeeId)` | `Store.findEmployee(employeeId)` |
-| 4 View Schedule (include) | `displayEmployeeSchedule()` | `Employee.viewSchedule()` |
-| 5 Select a shift (5a: none → prompt) | `selectShift(shiftId)` | `Schedule.findShift(shiftId)` |
-| 6 Show shift details | `displayShiftDetails()` | – |
-| 7 Enter start/end time and role | `enterShiftInformation(data)` | – |
-| 8-10 Validate, save, confirm (6a missing fields, 8a invalid → correct and resubmit) | `submitShiftChanges()` | `StoreOwner.editShift(aShift)` → `updateShift()` → `validate()` → `isValid` → `Schedule.save()` |
-| Build the schedule | `buildSchedule(data)`, `assignShift(data)` | new `Schedule`, `Schedule.addShift(shift)` |
-| Publish | `publishSchedule()` | `StoreOwner.publishSchedule(schedule)` |
-| Cancel a shift | `cancelSelectedShift()` | `EmployeeShift.cancelShift()` |
-| Employee views own schedule (published shifts only) | `viewMySchedule(employeeId)` | `Store.findEmployee()`, `Employee.viewSchedule()` |
-
-Extra checks: dates must be `YYYY-MM-DD`, times `HH:MM` (24-hour); an employee cannot have two overlapping shifts on the same day; cancelled shifts cannot be edited and stay cancelled when the schedule is published again.
-
-Feature 5 commands:
-
-```
-npm run scheduling:demo         # prints every screen of the use case (uses a temporary database)
-npm run scheduling-page:check   # tests the page and controller, all alternate flows (temporary database)
-npm run scheduling:check        # tests the domain classes (needs db:setup + db:seed)
-npm run scheduling:migrate      # adds the new EmployeeShift.role column to an existing database
-```
+Allows the store to organize employee information, create work schedules, assign shifts, and manage schedule updates.
 
 ### Feature 6 — Customer Support
 
-- Retrieve customer information and purchase history.
-- Create and manage customer complaints.
-- Escalate complaints to the store owner.
-- Process simulated returns and refunds.
-- Record customer support interactions.
+Supports customer inquiries, complaint management, purchase history retrieval, product returns, refunds, and the escalation of customer concerns to the store owner.
 
-## 3. Technologies Used
+## 4. Prototype Development
 
-| Technology | Purpose |
-|---|---|
-| JavaScript / Node.js | Develop the system's features and business logic |
-| SQLite | Store the system's information |
-| Sequelize | Connect the system's classes to the database |
-| Git | Track changes to our work |
-| GitHub | Share code and collaborate as a team |
-| Visual Studio Code | Develop and test the prototype |
+### Prototype 1 — Initial Development
 
-## 4. How to Run the Prototype
+The first prototype established the basic structure of the proposed system.
 
-### Step 1 — Install the project
+During this phase, the team created the main classes, organized the database, and developed the initial functionality for the six features.
 
-Download or clone the GitHub repository and open the project folder in Visual Studio Code.
+### Prototype 2 — System Improvements
 
-Open the terminal and run:
+The second prototype focuses on improving the initial implementation and aligning the code with the updated system design.
 
-```bash
-npm install
-```
+The improvements include:
 
-### Step 2 — Create a database
+- Refining existing classes, attributes, and methods.
+- Implementing additional system functionality.
+- Improving data validation and error handling.
+- Strengthening relationships between different features.
+- Expanding testing to verify system behavior and data consistency.
 
-The system uses a local SQLite database.
+Development and testing continue as the remaining requirements are finalized.
 
-For a new database, run:
+## 5. Technologies Used
 
-```bash
-npm run db:setup
-```
+The project uses the following technologies:
 
-**Important:** The setup command does not delete an existing database. It stops if the selected database file already exists.
+- **JavaScript and Node.js:** System development and business logic.
+- **SQLite:** Database storage.
+- **Sequelize:** Database management and interaction.
+- **Git and GitHub:** Version control and team collaboration.
+- **Visual Studio Code:** Development environment.
 
-To test using a separate database in Windows PowerShell, run:
+## 6. Running the Prototype
 
-```powershell
-$env:SQLITE_PATH = "database\prototype-test.sqlite"
-Test-Path $env:SQLITE_PATH
-```
+To run the project locally:
 
-Continue only if the result is `False`. Then run:
+1. Download or clone the repository.
+2. Open the project folder in Visual Studio Code.
+3. Install the required dependencies using `npm install`.
+4. For a new database, run `npm run db:setup`.
+5. Add the sample data using `npm run db:seed`.
 
-```powershell
-npm run db:setup
-```
+To run the overall prototype verification tests, use:
 
-### Step 3 — Add sample information
+`node scripts/verifyPrototype2Integration.js`
 
-Run:
+**Note:** Database setup and sample-data commands are intended for a new database. Avoid running them against an existing database containing information you want to preserve.
 
-```bash
-npm run db:seed
-```
+## 7. Team Collaboration
 
-This adds sample records for products, suppliers, customers, employees, schedules, sales, and customer support.
+The project was developed collaboratively by Group 1.
 
-Only run this command on a newly initialized database.
+Each team member was responsible for a specific feature, allowing the team to work on different parts of the system simultaneously.
 
-## 5. Team Collaboration
+GitHub was used to organize development through separate branches and pull requests. Changes were reviewed, tested, and integrated into the main project as development progressed.
 
-Our team used Git and GitHub to collaborate throughout the development process.
+This approach helped the team coordinate its work and maintain consistency across the system.
 
-Each team member worked on their assigned feature using a separate branch.
+## 8. Project Status
 
-Once a feature was completed, it was reviewed and merged into the main project.
+The project is currently in the Prototype 2 development stage.
 
-This approach allowed team members to work independently while bringing all six features together into one shared prototype.
+Major improvements have been integrated into the inventory, supplier and customer profiles, accounting, employee scheduling, and customer support features.
 
+The dashboard and reporting functionality is undergoing further development to meet the updated system requirements.
 
-## 6. Conclusion
+The team continues to review and test the prototype against its revised class diagrams and system specifications.
 
-For Prototype 1, our team successfully created and combined the six main features of the proposed Marché Aghapy Store Management System.
+## 9. Conclusion
 
-We established a shared database, implemented the system's main classes and relationships, and tested key operations.
+The Marché Aghapy Store Management System demonstrates how information technology can support the operations of a small grocery business.
 
-All seven verification suites passed during our final integration testing.
+Through the development of the two prototypes, the team has established a foundation for managing important business activities in a more organized and consistent way.
 
-This prototype provides the foundation for further development and improvements in Prototype 2.
+The project also demonstrates the practical application of systems analysis, object-oriented design, database management, software development, and teamwork.
+
+**This project is an academic technical prototype and is not intended to serve as a fully deployed commercial application.**
