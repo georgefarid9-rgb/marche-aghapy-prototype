@@ -17,6 +17,23 @@ class Expense extends Transaction {
 
     return new Date(this.dueDate) < new Date(currentDate);
   }
+
+  // Boolean validation required by the accounting contract.
+  isValid() {
+    try {
+      return (
+        super.isValid() &&
+        this.transactionType === "Expense" &&
+        Boolean(this.categorize())
+      );
+    } catch (error) {
+      return false;
+    }
+  }
+
+  isOverdue(currentDate = new Date()) {
+    return this.flagOverdue(currentDate);
+  }
 }
 
 module.exports = Expense;

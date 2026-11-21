@@ -12,7 +12,22 @@ class Transaction extends Model {
       throw new Error("Transaction date is required.");
     }
 
+    if (!["Revenue", "Expense"].includes(this.transactionType)) {
+      throw new Error("Transaction type must be Revenue or Expense.");
+    }
+
     return true;
+  }
+
+  // Boolean validation for the accounting contract.
+  // Kept separate from Sequelize's built-in validate() method.
+  isValid() {
+    try {
+      this.validateTransaction();
+      return true;
+    } catch (error) {
+      return false;
+    }
   }
 
   categorize() {
@@ -41,13 +56,11 @@ Transaction.init(
       },
     },
 
-    // New field: optional due date for expenses
     dueDate: {
       type: DataTypes.DATEONLY,
       allowNull: true,
     },
 
-    // New field: optional supplier linked to an expense
     supplierId: {
       type: DataTypes.STRING,
       allowNull: true,
@@ -65,7 +78,6 @@ Transaction.init(
         key: "thresholdId",
       },
     },
-
 
     date: {
       type: DataTypes.DATEONLY,
@@ -87,6 +99,11 @@ Transaction.init(
     category: {
       type: DataTypes.STRING,
       allowNull: false,
+    },
+
+    source: {
+      type: DataTypes.STRING,
+      allowNull: true,
     },
 
     description: {

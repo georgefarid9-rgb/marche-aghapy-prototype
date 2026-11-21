@@ -1,3 +1,4 @@
+const sequelize = require("../database");
 const Supplier = require("./Supplier");
 const Product = require("./Product");
 const InventoryRecord = require("./InventoryRecord");
@@ -119,6 +120,19 @@ FinancialReport.belongsTo(Ledger, {
   as: "ledger",
 });
 
+//
+// Feature 4 — Store owner reviews financial reports
+//
+StoreOwner.hasMany(FinancialReport, {
+  foreignKey: "reviewedBy",
+  as: "financialReports",
+});
+
+FinancialReport.belongsTo(StoreOwner, {
+  foreignKey: "reviewedBy",
+  as: "reviewer",
+});
+
 
 // Ledger contains transactions
 Ledger.hasMany(Transaction, {
@@ -140,6 +154,14 @@ Transaction.belongsTo(BudgetThreshold, {
   foreignKey: "budgetThresholdId",
   as: "budgetThreshold",
 });
+
+
+// Feature 4 — Budget threshold tracks related expenses
+BudgetThreshold.hasMany(Transaction, {
+  foreignKey: "budgetThresholdId",
+  as: "expenses",
+});
+
 
 // Store 1 ---- 1..* Employee (employs)
 Store.hasMany(Employee, {
@@ -386,6 +408,73 @@ ReturnRequest.belongsTo(Employee, {
   as: "employee",
 });
 
+// Ledger 1 ---- 0..* ReturnRequest (a refunded return is recorded in the store's ledger)
+// ledgerId is empty until the refund is posted (Pending and Rejected returns have no ledger).
+Ledger.hasMany(ReturnRequest, {
+  foreignKey: { name: "ledgerId", allowNull: true },
+  as: "returnRequests",
+  onDelete: "RESTRICT",
+  onUpdate: "CASCADE",
+});
+
+ReturnRequest.belongsTo(Ledger, {
+  foreignKey: { name: "ledgerId", allowNull: true },
+  as: "ledger",
+  onDelete: "RESTRICT",
+  onUpdate: "CASCADE",
+});
+
+// Many-to-many links added for the Prototype 2 class diagram. Each link table only holds two
+// keys, so no other feature's table is changed.
+const linkTable = (name, tableName) =>
+  sequelize.define(name, {}, { tableName, timestamps: false });
+
+// Employee 0..* ---- 0..* Customer (assists). Filled in by Employee.assistCustomer().
+const EmployeeCustomer = linkTable("EmployeeCustomer", "employee_customers");
+Employee.belongsToMany(Customer, {
+  through: EmployeeCustomer,
+  foreignKey: "employeeId",
+  otherKey: "customerId",
+  as: "customers",
+});
+Customer.belongsToMany(Employee, {
+  through: EmployeeCustomer,
+  foreignKey: "customerId",
+  otherKey: "employeeId",
+  as: "employees",
+});
+
+// Sale 0..* ---- 0..* Revenue (a sale is recorded as Revenue entries in the ledger).
+// Revenue entries are Transaction rows with transactionType "Revenue" (Feature 4).
+const SaleRevenue = linkTable("SaleRevenue", "sale_revenues");
+Sale.belongsToMany(Transaction, {
+  through: SaleRevenue,
+  foreignKey: "saleId",
+  otherKey: "transactionId",
+  as: "revenue",
+});
+Transaction.belongsToMany(Sale, {
+  through: SaleRevenue,
+  foreignKey: "transactionId",
+  otherKey: "saleId",
+  as: "sales",
+});
+
+// Sale 0..* ---- 0..* SalesReport (a sales report summarises sales, Feature 2).
+const SaleSalesReport = linkTable("SaleSalesReport", "sale_sales_reports");
+Sale.belongsToMany(SalesReport, {
+  through: SaleSalesReport,
+  foreignKey: "saleId",
+  otherKey: "reportId",
+  as: "salesReports",
+});
+SalesReport.belongsToMany(Sale, {
+  through: SaleSalesReport,
+  foreignKey: "reportId",
+  otherKey: "saleId",
+  as: "sales",
+});
+
 // Employee 1 ---- 0..* SupportRequest (logs)
 Employee.hasMany(SupportRequest, {
   foreignKey: "employeeId",
@@ -516,4 +605,7 @@ module.exports = {
   ReturnRequest,
   Sale,
   SaleItem,
+  EmployeeCustomer,
+  SaleRevenue,
+  SaleSalesReport,
 };
