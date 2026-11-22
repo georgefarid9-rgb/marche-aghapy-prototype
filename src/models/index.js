@@ -235,10 +235,11 @@ ReportFilter.belongsTo(Report, {
   as: "report",
 });
 
-// Report 1 ---- 0..* ReportExport (exported as)
+// Report 1 ---- 0..* ReportExport (exported as). "exports" matches exports[0..*] in the
+// class diagram.
 Report.hasMany(ReportExport, {
   foreignKey: "reportId",
-  as: "reportExports",
+  as: "exports",
 });
 
 ReportExport.belongsTo(Report, {
@@ -475,6 +476,39 @@ SalesReport.belongsToMany(Sale, {
   as: "sales",
 });
 
+// ----- Feature 2 - Dashboard and Reports (Prototype 2 relationships) -----
+// Filled in by generateReport(): the inventory records each report was built from.
+
+// InventoryReport 0..* ---- 1..* InventoryRecord
+const InventoryReportRecord = linkTable("InventoryReportRecord", "inventory_report_records");
+InventoryReport.belongsToMany(InventoryRecord, {
+  through: InventoryReportRecord,
+  foreignKey: "reportId",
+  otherKey: "inventoryId",
+  as: "inventoryRecords",
+});
+InventoryRecord.belongsToMany(InventoryReport, {
+  through: InventoryReportRecord,
+  foreignKey: "inventoryId",
+  otherKey: "reportId",
+  as: "inventoryReports",
+});
+
+// ExpiryRestockReport 0..* ---- 1..* InventoryRecord
+const ExpiryRestockReportRecord = linkTable("ExpiryRestockReportRecord", "expiry_restock_report_records");
+ExpiryRestockReport.belongsToMany(InventoryRecord, {
+  through: ExpiryRestockReportRecord,
+  foreignKey: "reportId",
+  otherKey: "inventoryId",
+  as: "inventoryRecords",
+});
+InventoryRecord.belongsToMany(ExpiryRestockReport, {
+  through: ExpiryRestockReportRecord,
+  foreignKey: "inventoryId",
+  otherKey: "reportId",
+  as: "expiryRestockReports",
+});
+
 // Employee 1 ---- 0..* SupportRequest (logs)
 Employee.hasMany(SupportRequest, {
   foreignKey: "employeeId",
@@ -608,4 +642,6 @@ module.exports = {
   EmployeeCustomer,
   SaleRevenue,
   SaleSalesReport,
+  InventoryReportRecord,
+  ExpiryRestockReportRecord,
 };

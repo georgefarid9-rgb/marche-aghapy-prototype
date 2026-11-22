@@ -33,6 +33,7 @@ const scripts = [
   // Regression checks already used by the whole team.
   "testDatabase.js",
   "verifyPrototype.js",
+  "migrateFeature2Prototype2.js", // Must also handle current-schema databases.
   "verifyReports.js",
   "verifyProfiles.js",
   "verifyScheduling.js",
