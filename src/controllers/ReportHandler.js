@@ -87,7 +87,7 @@ class ReportHandler {
   viewReports() {
     return this.run(async () => {
       await this.ensureSummary();
-      return { ok: true, reportTypes: this.summary.getAvailableReportTypes() };
+      return { ok: true, message: "Choose a report type.", reportTypes: this.summary.getAvailableReportTypes() };
     });
   }
 
