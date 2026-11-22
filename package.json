@@ -17,6 +17,8 @@
     "accounting-reports:check": "node scripts/verifyAccountingReports.js",
     "profiles:check": "node scripts/verifyProfiles.js",
     "reports:check": "node scripts/verifyReports.js",
+    "reports:demo": "node scripts/demoReports.js",
+    "reports:migrate": "node scripts/migrateFeature2Prototype2.js",
     "profiles:migrate": "node scripts/migrateFeature3Profiles.js",
     "support:check": "node scripts/verifyCustomerSupport.js",
     "support:migrate": "node scripts/migrateFeature6Support.js",

@@ -100,6 +100,12 @@ To run the overall prototype verification tests, use:
 
 **Note:** Database setup and sample-data commands are intended for a new database. Avoid running them against an existing database containing information you want to preserve.
 
+### Feature 2 — Dashboard and Reports
+
+- `npm run reports:demo` walks through the dashboard and the three reports (inventory, sales, expiry / restock) on a temporary database. Exported PDF and CSV files are saved in the `exports/` folder.
+- `npm run reports:check` tests every Feature 2 class and method.
+- `npm run reports:migrate` updates a database created before Prototype 2 (it makes a backup first). A new database from `npm run db:setup` does not need it.
+
 ## 7. Team Collaboration
 
 The project was developed collaboratively by Group 1.
@@ -114,9 +120,7 @@ This approach helped the team coordinate its work and maintain consistency acros
 
 The project is currently in the Prototype 2 development stage.
 
-Major improvements have been integrated into the inventory, supplier and customer profiles, accounting, employee scheduling, and customer support features.
-
-The dashboard and reporting functionality is undergoing further development to meet the updated system requirements.
+Major improvements have been integrated into the inventory, dashboard and reports, supplier and customer profiles, accounting, employee scheduling, and customer support features.
 
 The team continues to review and test the prototype against its revised class diagrams and system specifications.
 

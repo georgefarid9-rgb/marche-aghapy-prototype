@@ -151,3 +151,6 @@ vite.config.ts.timestamp-*
 # SQLite database files
 database/*.sqlite
 database/*.sqlite-journal
+
+# Report files exported by Feature 2 (ReportExport.createExportFile)
+exports/
