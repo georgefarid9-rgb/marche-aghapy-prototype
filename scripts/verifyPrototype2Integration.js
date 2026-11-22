@@ -34,6 +34,7 @@ const scripts = [
   "testDatabase.js",
   "verifyPrototype.js",
   "migrateFeature2Prototype2.js", // Must also handle current-schema databases.
+  "verifyFeature2Migration.js", // Exercises legacy values on its own disposable database.
   "verifyReports.js",
   "verifyProfiles.js",
   "verifyScheduling.js",

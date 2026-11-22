@@ -3,6 +3,10 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
+// Always use a fresh database, even when called by the integration suite.
+const testDir = fs.mkdtempSync(path.join(os.tmpdir(), "aghapy-reports-check-"));
+process.env.SQLITE_PATH = path.join(testDir, "reports.sqlite");
+
 // Exported test files go to a temporary folder that is removed at the end.
 const exportDir = fs.mkdtempSync(path.join(os.tmpdir(), "aghapy-report-exports-"));
 process.env.REPORT_EXPORT_DIR = exportDir;
@@ -195,6 +199,7 @@ async function createTestStoreData() {
 async function verifyReports() {
   try {
     await sequelize.authenticate();
+    await sequelize.sync();
 
     // ----- 1. Foreign keys exist in the database itself -----
     console.log("\n1. Foreign keys in the database schema");
@@ -716,6 +721,20 @@ async function verifyReports() {
     const salesByProduct = await handler.applyFilter(null, null, "VR-PROD-LOW", null);
     expectOk(salesByProduct, "sales filter by product");
     assert.deepEqual(idsOf(salesRep.filteredResults, "saleId"), ["VR-SALE-2"]);
+    assert.ok(salesByProduct.summary.includes("Overall report totals (before filtering):"));
+    assert.ok(salesByProduct.summary.some((line) => line.includes("showing 1 of 2 record(s)")));
+    assert.equal(salesRep.totalSalesAmount, periodTotal);
+    const filteredCsv = await handler.exportReport("CSV");
+    expectOk(filteredCsv, "export filtered sales CSV");
+    const filteredCsvText = fs.readFileSync(filteredCsv.filePath, "utf8");
+    assert.match(filteredCsvText, /Overall report totals \(before filtering\)/);
+    assert.match(filteredCsvText, /VR-SALE-2/);
+    assert.doesNotMatch(filteredCsvText, /VR-SALE-1/);
+    const filteredPdf = await handler.exportReport("PDF");
+    expectOk(filteredPdf, "export filtered sales PDF");
+    const filteredPdfText = fs.readFileSync(filteredPdf.filePath, "latin1");
+    assert.match(filteredPdfText, /VR-SALE-2/);
+    assert.doesNotMatch(filteredPdfText, /VR-SALE-1/);
     pass("applyFilter() by product keeps the sale that contains VR-PROD-LOW");
 
     const salesByDate = await handler.applyFilter(today(), today(), null, null);
@@ -864,6 +883,7 @@ async function verifyReports() {
     }
     fs.rmSync(exportDir, { recursive: true, force: true });
     await sequelize.close();
+    fs.rmSync(testDir, { recursive: true, force: true });
   }
 }
 
