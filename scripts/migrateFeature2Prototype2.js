@@ -64,6 +64,10 @@ async function migrateFeature2Prototype2() {
 
   try {
     const databasePath = sequelize.options.storage;
+    const defaultPath = path.resolve(__dirname, "..", "database", "marche-aghapy.sqlite");
+    if (process.env.BTM495_TEST_DB === "1" && path.resolve(databasePath) === defaultPath) {
+      throw new Error("Testing requires SQLITE_PATH to point to a disposable database.");
+    }
     if (!fs.existsSync(databasePath)) {
       throw new Error(`No database found at ${databasePath}. Use npm run db:setup for a new database.`);
     }

@@ -194,6 +194,7 @@ class ReportBase extends Model {
       `Report ID: ${this.reportId}`,
       `Period: ${toDateOnly(report.periodStart)} to ${toDateOnly(report.periodEnd)}`,
       `Generated: ${report.generatedDate ? new Date(report.generatedDate).toISOString() : "not yet"}`,
+      ...(this.filteredResults ? ["Overall report totals (before filtering):"] : []),
       ...this.getSummaryLines(),
     ];
     if (this.filteredResults) {
