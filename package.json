@@ -1,4 +1,3 @@
-
 {
   "name": "marche-aghapy-prototype",
   "version": "1.0.0",
@@ -24,7 +23,12 @@
     "support:migrate": "node scripts/migrateFeature6Support.js",
     "support:migrate-refunds": "node scripts/migrateFeature6Refunds.js",
     "support:migrate-links": "node scripts/migrateFeature6Prototype2.js",
-    "support:migrate-check": "node scripts/verifyFeature6Migration.js"
+    "support:migrate-check": "node scripts/verifyFeature6Migration.js",
+    "start": "node src/server.js",
+    "inventory:demo": "node scripts/seedFeature1Demo.js",
+    "inventory:web-check": "node scripts/verifyInventoryWeb.js",
+    "inventory:browser-check": "node scripts/verifyInventoryBrowser.js",
+    "inventory:expiry-check": "node scripts/verifyExpiryReconciliation.js"
   },
   "repository": {
     "type": "git",
@@ -50,5 +54,8 @@
   },
   "allowScripts": {
     "sqlite3@6.0.1": true
+  },
+  "devDependencies": {
+    "playwright": "^1.65.1"
   }
 }

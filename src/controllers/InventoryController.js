@@ -1,5 +1,6 @@
 
 const sequelize = require("../database");
+const { QueryTypes } = require("sequelize");
 
 const {
   Product,
@@ -59,7 +60,153 @@ function validDate(value) {
 }
 
 function hasOwn(object, field) {
-  return Object.prototype.hasOwnProperty.call(object, field);
+  return Object.prototype.hasOwnProperty.call(
+    object,
+    field
+  );
+}
+
+function quoteIdentifier(value) {
+  return `"${String(value).replaceAll('"', '""')}"`;
+}
+
+// Check the actual SQLite foreign-key relationships before
+// changing either primary key.
+//
+// A successful Sequelize association declaration does not
+// necessarily mean an older database has the same constraints.
+async function assertSafeKeyChange(
+  parentTable,
+  keyColumn,
+  oldId,
+  requiredChild,
+  transaction
+) {
+  const select = {
+    type: QueryTypes.SELECT,
+    transaction,
+  };
+
+  const setting = await sequelize.query(
+    "PRAGMA foreign_keys",
+    select
+  );
+
+  if (Number(setting[0]?.foreign_keys) !== 1) {
+    throw new Error(
+      "ID correction requires SQLite foreign-key enforcement."
+    );
+  }
+
+  const existingViolations = await sequelize.query(
+    "PRAGMA foreign_key_check",
+    select
+  );
+
+  if (existingViolations.length) {
+    throw new Error(
+      "Database already has foreign-key violations. Correct them first."
+    );
+  }
+
+  const tables = await sequelize.query(
+    "SELECT name FROM sqlite_master " +
+      "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+    select
+  );
+
+  let requiredRelationship = false;
+
+  for (const { name } of tables) {
+    if (name === parentTable) continue;
+
+    const table = quoteIdentifier(name);
+
+    const keys = await sequelize.query(
+      `PRAGMA foreign_key_list(${table})`,
+      select
+    );
+
+    const references = keys.filter(
+      (key) =>
+        key.table === parentTable &&
+        (
+          key.to === keyColumn ||
+          key.to === null ||
+          key.to === ""
+        )
+    );
+
+    if (
+      name === requiredChild &&
+      references.some(
+        (key) => key.from === keyColumn
+      )
+    ) {
+      requiredRelationship = true;
+    }
+
+    // All declared relationships referencing this key
+    // must support cascading updates.
+    for (const key of references) {
+      if (
+        String(key.on_update).toUpperCase() !==
+        "CASCADE"
+      ) {
+        throw new Error(
+          `Cannot correct ${keyColumn}: ` +
+          `${name}.${key.from} must use ON UPDATE CASCADE. ` +
+          "A database migration is required."
+        );
+      }
+    }
+
+    // Detect records that contain the old identifier
+    // but do not have a declared cascading foreign key.
+    const columns = await sequelize.query(
+      `PRAGMA table_info(${table})`,
+      select
+    );
+
+    const hasKeyColumn = columns.some(
+      (column) => column.name === keyColumn
+    );
+
+    const hasDeclaredReference =
+      references.some(
+        (key) => key.from === keyColumn
+      );
+
+    if (
+      hasKeyColumn &&
+      !hasDeclaredReference
+    ) {
+      const rows = await sequelize.query(
+        `SELECT 1 FROM ${table} ` +
+          `WHERE ${quoteIdentifier(keyColumn)} = :oldId LIMIT 1`,
+        {
+          ...select,
+          replacements: { oldId },
+        }
+      );
+
+      if (rows.length) {
+        throw new Error(
+          `Cannot correct ${keyColumn}: ` +
+          `${name}.${keyColumn} contains related data ` +
+          "without a cascading foreign key."
+        );
+      }
+    }
+  }
+
+  if (!requiredRelationship) {
+    throw new Error(
+      `Cannot correct ${keyColumn}: ` +
+      `missing ${requiredChild} cascading relationship. ` +
+      "A database migration is required."
+    );
+  }
 }
 
 class InventoryController {
@@ -78,7 +225,10 @@ class InventoryController {
   async retrieveInventory() {
     return InventoryRecord.findAll({
       include: [
-        { model: Product, as: "product" },
+        {
+          model: Product,
+          as: "product",
+        },
       ],
       order: [["inventoryId", "ASC"]],
     });
@@ -87,16 +237,21 @@ class InventoryController {
   // 2. Execute the selected maintenance task.
   async executeSelectedSubflow() {
     if (this.selectedTask === "NEW") {
-      await this.submitNewProduct(this.pendingData);
+      await this.submitNewProduct(
+        this.pendingData
+      );
     } else if (this.selectedTask === "UPDATE") {
-      await this.submitUpdates(this.pendingData);
+      await this.submitUpdates(
+        this.pendingData
+      );
     } else {
       this.lastError =
         "Select an inventory maintenance task first.";
     }
   }
 
-  // 3. Create a product and inventory in one transaction.
+  // 3. Create a new product and inventory record
+  // together in one transaction.
   async submitNewProduct(data) {
     this.selectedTask = "NEW";
     this.pendingData = data;
@@ -106,69 +261,94 @@ class InventoryController {
     this.lastResult = null;
     this.lastAlert = null;
 
-    if (!this.validateSubmittedData()) return false;
+    if (!this.validateSubmittedData()) {
+      return false;
+    }
 
     const details = parseData(data);
 
     try {
       const result = await sequelize.transaction(
         async (transaction) => {
-          if (
-            await Product.findByPk(details.productId, {
-              transaction,
-            })
-          ) {
-            throw new Error("Product ID already exists.");
+          const existingProduct =
+            await Product.findByPk(
+              details.productId,
+              { transaction }
+            );
+
+          if (existingProduct) {
+            throw new Error(
+              "Product ID already exists."
+            );
           }
 
-          if (
-            await InventoryRecord.findByPk(details.inventoryId, {
-              transaction,
-            })
-          ) {
-            throw new Error("Inventory ID already exists.");
+          const existingInventory =
+            await InventoryRecord.findByPk(
+              details.inventoryId,
+              { transaction }
+            );
+
+          if (existingInventory) {
+            throw new Error(
+              "Inventory ID already exists."
+            );
           }
 
           if (
             details.supplierId &&
-            !(await Supplier.findByPk(details.supplierId, {
-              transaction,
-            }))
+            !(await Supplier.findByPk(
+              details.supplierId,
+              { transaction }
+            ))
           ) {
-            throw new Error("Supplier does not exist.");
+            throw new Error(
+              "Supplier does not exist."
+            );
           }
 
           const product = Product.build({
             productId: details.productId,
             productName: details.productName,
-            description: details.description ?? null,
+            description:
+              details.description ?? null,
             category: details.category,
-            supplierId: details.supplierId ?? null,
+            supplierId:
+              details.supplierId ?? null,
           });
 
-          await product.recordNewProduct(data, {
-            transaction,
-          });
+          await product.recordNewProduct(
+            data,
+            { transaction }
+          );
 
-          const inventory = InventoryRecord.build();
+          const inventory =
+            InventoryRecord.build();
 
           await inventory.createInventoryRecord(
             JSON.stringify({
               inventoryId: details.inventoryId,
               productId: details.productId,
-              quantityOnHand: details.quantityOnHand,
-              reorderLevel: details.reorderLevel ?? 0,
-              expiryDate: details.expiryDate ?? null,
+              quantityOnHand:
+                details.quantityOnHand,
+              reorderLevel:
+                details.reorderLevel ?? 0,
+              expiryDate:
+                details.expiryDate ?? null,
             }),
             { transaction }
           );
 
-          const alert = await this._tryGenerateAlert(
-            inventory,
-            { transaction }
-          );
+          const alert =
+            await this._tryGenerateAlert(
+              inventory,
+              { transaction }
+            );
 
-          return { product, inventory, alert };
+          return {
+            product,
+            inventory,
+            alert,
+          };
         }
       );
 
@@ -178,6 +358,7 @@ class InventoryController {
       };
 
       this.lastAlert = result.alert;
+
       return true;
     } catch (error) {
       this.lastError = error.message;
@@ -188,21 +369,29 @@ class InventoryController {
   // 4. Retrieve the selected product.
   async retrieveSelectedProduct(options = {}) {
     if (!this.selectedProductId) {
-      throw new Error("Select a product first.");
+      throw new Error(
+        "Select a product first."
+      );
     }
 
-    return Product.findByPk(this.selectedProductId, {
-      include: [
-        {
-          model: InventoryRecord,
-          as: "inventoryRecord",
-        },
-      ],
-      ...options,
-    });
+    return Product.findByPk(
+      this.selectedProductId,
+      {
+        include: [
+          {
+            model: InventoryRecord,
+            as: "inventoryRecord",
+          },
+        ],
+        ...options,
+      }
+    );
   }
 
-  // 5. Update product and inventory information atomically.
+  // 5. Save product and inventory changes.
+  //
+  // This now supports changing both IDs together,
+  // as well as all ordinary editable fields.
   async submitUpdates(data) {
     this.selectedTask = "UPDATE";
     this.pendingData = data;
@@ -212,60 +401,263 @@ class InventoryController {
     this.lastResult = null;
     this.lastAlert = null;
 
-    if (!this.validateSubmittedData()) return false;
+    if (!this.validateSubmittedData()) {
+      return false;
+    }
 
     const details = parseData(data);
 
     try {
       const result = await sequelize.transaction(
         async (transaction) => {
-          const product = await this.retrieveSelectedProduct({
-            transaction,
-          });
+          const original =
+            await this.retrieveSelectedProduct({
+              transaction,
+            });
 
-          if (!product || !product.inventoryRecord) {
+          if (
+            !original ||
+            !original.inventoryRecord
+          ) {
             throw new Error(
               "Product or inventory record was not found."
             );
           }
 
-          const inventory = product.inventoryRecord;
+          const originalInventory =
+            original.inventoryRecord;
+
+          const oldProductId =
+            original.productId;
+
+          const oldInventoryId =
+            originalInventory.inventoryId;
+
+          const newProductId =
+            hasOwn(details, "productId")
+              ? details.productId.trim()
+              : oldProductId;
+
+          const newInventoryId =
+            hasOwn(details, "inventoryId")
+              ? details.inventoryId.trim()
+              : oldInventoryId;
+
+          // Validate the proposed product information.
+          if (
+            !original.validateProductInformation(
+              data
+            )
+          ) {
+            throw new Error(
+              "Invalid product information."
+            );
+          }
+
+          // Check the selected supplier.
+          if (
+            details.supplierId &&
+            !(await Supplier.findByPk(
+              details.supplierId,
+              { transaction }
+            ))
+          ) {
+            throw new Error(
+              "Supplier does not exist."
+            );
+          }
+
+          // Check a proposed Product ID correction.
+          if (newProductId !== oldProductId) {
+            const duplicateProduct =
+              await Product.findByPk(
+                newProductId,
+                { transaction }
+              );
+
+            if (duplicateProduct) {
+              throw new Error(
+                "Product ID already exists."
+              );
+            }
+
+            await assertSafeKeyChange(
+              "products",
+              "productId",
+              oldProductId,
+              "inventory_records",
+              transaction
+            );
+          }
+
+          // Check a proposed Inventory ID correction.
+          if (newInventoryId !== oldInventoryId) {
+            const duplicateInventory =
+              await InventoryRecord.findByPk(
+                newInventoryId,
+                { transaction }
+              );
+
+            if (duplicateInventory) {
+              throw new Error(
+                "Inventory ID already exists."
+              );
+            }
+
+            await assertSafeKeyChange(
+              "inventory_records",
+              "inventoryId",
+              oldInventoryId,
+              "restock_alerts",
+              transaction
+            );
+          }
+
+          // Update the Product primary key first.
+          // SQLite cascades the change into referencing
+          // tables when their constraints support it.
+          if (newProductId !== oldProductId) {
+            await sequelize.query(
+              'UPDATE "products" ' +
+              'SET "productId" = :newId ' +
+              'WHERE "productId" = :oldId',
+              {
+                replacements: {
+                  newId: newProductId,
+                  oldId: oldProductId,
+                },
+                transaction,
+              }
+            );
+          }
+
+          // Update the Inventory primary key.
+          // Restock alerts and reports must follow
+          // this change through their foreign keys.
+          if (newInventoryId !== oldInventoryId) {
+            await sequelize.query(
+              'UPDATE "inventory_records" ' +
+              'SET "inventoryId" = :newId ' +
+              'WHERE "inventoryId" = :oldId',
+              {
+                replacements: {
+                  newId: newInventoryId,
+                  oldId: oldInventoryId,
+                },
+                transaction,
+              }
+            );
+          }
+
+          // Reload using the corrected IDs.
+          // This is important because the original
+          // Sequelize instances used the old keys.
+          const product =
+            await Product.findByPk(
+              newProductId,
+              {
+                include: [
+                  {
+                    model: InventoryRecord,
+                    as: "inventoryRecord",
+                  },
+                ],
+                transaction,
+              }
+            );
 
           if (
-            hasOwn(details, "inventoryId") &&
-            details.inventoryId !== inventory.inventoryId
+            !product ||
+            !product.inventoryRecord ||
+            product.inventoryRecord.inventoryId !==
+              newInventoryId ||
+            product.inventoryRecord.productId !==
+              newProductId
           ) {
-            throw new Error("Inventory ID cannot be changed.");
+            throw new Error(
+              "ID correction did not preserve the inventory relationship."
+            );
           }
 
-          if (!product.validateProductInformation(data)) {
-            throw new Error("Invalid product information.");
+          const inventory =
+            product.inventoryRecord;
+
+          // Save ordinary product fields separately.
+          // We deliberately omit productId because
+          // Product.js protects it from ordinary edits.
+          const productChanges = {};
+
+          for (const field of PRODUCT_FIELDS) {
+            if (hasOwn(details, field)) {
+              productChanges[field] = details[field];
+            }
           }
 
           if (
-            PRODUCT_FIELDS.some((field) => hasOwn(details, field))
+            Object.keys(productChanges).length
           ) {
-            await product.updateProductInformation(data, {
-              transaction,
-            });
+            await product.updateProductInformation(
+              JSON.stringify(productChanges),
+              { transaction }
+            );
+          }
+
+          // Save ordinary inventory fields separately.
+          const inventoryChanges = {};
+
+          for (const field of INVENTORY_FIELDS) {
+            if (hasOwn(details, field)) {
+              inventoryChanges[field] =
+                details[field];
+            }
           }
 
           if (
-            INVENTORY_FIELDS.some((field) => hasOwn(details, field))
+            Object.keys(inventoryChanges).length
           ) {
-            await inventory.updateInventoryInformation(data, {
-              transaction,
-            });
+            await inventory.updateInventoryInformation(
+              JSON.stringify(inventoryChanges),
+              { transaction }
+            );
           }
 
-          const alert = await this._tryGenerateAlert(
+          // Re-evaluate the stock and expiry conditions.
+          const alert =
+            await this._tryGenerateAlert(
+              inventory,
+              { transaction }
+            );
+
+          // Verify that the database relationships
+          // are still valid before committing.
+          const violations =
+            await sequelize.query(
+              "PRAGMA foreign_key_check",
+              {
+                type: QueryTypes.SELECT,
+                transaction,
+              }
+            );
+
+          if (violations.length) {
+            throw new Error(
+              "ID correction would damage database relationships."
+            );
+          }
+
+          return {
+            product,
             inventory,
-            { transaction }
-          );
-
-          return { product, inventory, alert };
+            alert,
+            newProductId,
+          };
         }
       );
+
+      // Update the selected ID only after
+      // the entire transaction succeeds.
+      this.selectedProductId =
+        result.newProductId;
 
       this.lastResult = {
         product: result.product,
@@ -273,6 +665,7 @@ class InventoryController {
       };
 
       this.lastAlert = result.alert;
+
       return true;
     } catch (error) {
       this.lastError = error.message;
@@ -280,21 +673,37 @@ class InventoryController {
     }
   }
 
-  // 6. Validate information before saving.
+  // Keep compatibility with the existing
+  // Product ID correction API endpoint.
+  async correctProductId(newProductId) {
+    return this.submitUpdates(
+      JSON.stringify({
+        productId: newProductId,
+      })
+    );
+  }
+
+  // 6. Validate all submitted information.
   validateSubmittedData() {
-    const details = parseData(this.pendingData);
+    const details = parseData(
+      this.pendingData
+    );
 
     if (!details) {
       this.lastError =
         "Provide a valid JSON object as a string.";
+
       return false;
     }
 
     if (
-      this.selectedTask !== "NEW" &&
-      this.selectedTask !== "UPDATE"
+      !["NEW", "UPDATE"].includes(
+        this.selectedTask
+      )
     ) {
-      this.lastError = "Select NEW or UPDATE as the task.";
+      this.lastError =
+        "Select NEW or UPDATE as the task.";
+
       return false;
     }
 
@@ -306,111 +715,175 @@ class InventoryController {
         category: details.category,
       });
 
-      if (!sample.validateProductInformation(this.pendingData)) {
+      if (
+        !sample.validateProductInformation(
+          this.pendingData
+        )
+      ) {
         this.lastError =
           "A valid product ID, name, and category are required.";
+
         return false;
       }
 
       if (
-        typeof details.inventoryId !== "string" ||
+        typeof details.inventoryId !==
+          "string" ||
         !details.inventoryId.trim()
       ) {
-        this.lastError = "Inventory ID is required.";
+        this.lastError =
+          "Inventory ID is required.";
+
         return false;
       }
 
-      if (!hasOwn(details, "quantityOnHand")) {
-        this.lastError = "Initial quantity is required.";
+      if (
+        !hasOwn(
+          details,
+          "quantityOnHand"
+        )
+      ) {
+        this.lastError =
+          "Initial quantity is required.";
+
         return false;
       }
     } else {
       if (!this.selectedProductId) {
         this.lastError =
           "Select a product before updating it.";
+
         return false;
       }
 
-      if (
-        hasOwn(details, "productId") &&
-        details.productId !== this.selectedProductId
-      ) {
-        this.lastError = "Product ID cannot be changed.";
-        return false;
-      }
+      // ID changes now count as valid update requests.
+      const editableFields = [
+        ...PRODUCT_FIELDS,
+        ...INVENTORY_FIELDS,
+        "productId",
+        "inventoryId",
+      ];
 
       if (
-        ![...PRODUCT_FIELDS, ...INVENTORY_FIELDS].some(
-          (field) => hasOwn(details, field)
+        !editableFields.some(
+          (field) =>
+            hasOwn(details, field)
         )
       ) {
         this.lastError =
           "Provide at least one product or inventory change.";
+
         return false;
       }
 
       if (
         hasOwn(details, "productName") &&
         (
-          typeof details.productName !== "string" ||
+          typeof details.productName !==
+            "string" ||
           !details.productName.trim()
         )
       ) {
-        this.lastError = "Product name cannot be blank.";
+        this.lastError =
+          "Product name cannot be blank.";
+
         return false;
       }
     }
 
-    for (const field of ["quantityOnHand", "reorderLevel"]) {
+    // Validate both identifiers.
+    for (const idField of [
+      "productId",
+      "inventoryId",
+    ]) {
+      if (
+        hasOwn(details, idField) &&
+        (
+          typeof details[idField] !==
+            "string" ||
+          !details[idField].trim()
+        )
+      ) {
+        this.lastError =
+          `${idField} must be a non-empty string.`;
+
+        return false;
+      }
+    }
+
+    // Validate stock quantities.
+    for (const field of [
+      "quantityOnHand",
+      "reorderLevel",
+    ]) {
       if (
         hasOwn(details, field) &&
         (
-          !Number.isSafeInteger(details[field]) ||
+          !Number.isSafeInteger(
+            details[field]
+          ) ||
           details[field] < 0
         )
       ) {
         this.lastError =
           `${field} must be a non-negative integer.`;
+
         return false;
       }
     }
 
+    // Validate expiry date.
     if (
       hasOwn(details, "expiryDate") &&
       !validDate(details.expiryDate)
     ) {
       this.lastError =
         "Expiry date must be a valid YYYY-MM-DD date or null.";
+
       return false;
     }
 
-    if (hasOwn(details, "category") &&
-        (typeof details.category !== "string" || !details.category.trim())) {
-      this.lastError = "Category must be a non-empty string.";
+    // Validate product category.
+    if (
+      hasOwn(details, "category") &&
+      (
+        typeof details.category !==
+          "string" ||
+        !details.category.trim()
+      )
+    ) {
+      this.lastError =
+        "Category must be a non-empty string.";
+
       return false;
     }
 
-    for (const field of ["description"]) {
-      if (
-        hasOwn(details, field) &&
-        details[field] !== null &&
-        typeof details[field] !== "string"
-      ) {
-        this.lastError = `${field} must be a string or null.`;
-        return false;
-      }
+    // Validate optional description.
+    if (
+      hasOwn(details, "description") &&
+      details.description !== null &&
+      typeof details.description !==
+        "string"
+    ) {
+      this.lastError =
+        "description must be a string or null.";
+
+      return false;
     }
 
+    // Validate optional supplier ID.
     if (
       hasOwn(details, "supplierId") &&
       details.supplierId !== null &&
       (
-        typeof details.supplierId !== "string" ||
+        typeof details.supplierId !==
+          "string" ||
         !details.supplierId.trim()
       )
     ) {
       this.lastError =
         "Supplier ID must be a non-empty string or null.";
+
       return false;
     }
 
@@ -423,14 +896,24 @@ class InventoryController {
     return this.validateSubmittedData();
   }
 
-  // Internal helper: create, refresh, or resolve a restock alert.
-  async _tryGenerateAlert(inventory, { transaction } = {}) {
-    const product = await Product.findByPk(inventory.productId, {
-      include: [
-        { model: Supplier, as: "supplier" },
-      ],
-      transaction,
-    });
+  // Internal helper: create, refresh, or resolve
+  // restock alerts after inventory changes.
+  async _tryGenerateAlert(
+    inventory,
+    { transaction } = {}
+  ) {
+    const product = await Product.findByPk(
+      inventory.productId,
+      {
+        include: [
+          {
+            model: Supplier,
+            as: "supplier",
+          },
+        ],
+        transaction,
+      }
+    );
 
     if (!product) {
       throw new Error(
@@ -438,14 +921,21 @@ class InventoryController {
       );
     }
 
-    const stockStatus = inventory.evaluateInventoryStatus();
-    const expiryStatus = inventory.evaluateExpiryConditions();
+    const stockStatus =
+      inventory.evaluateInventoryStatus();
+
+    const expiryStatus =
+      inventory.evaluateExpiryConditions();
 
     const daysLeft = inventory.expiryDate
-      ? daysBetween(today(), inventory.expiryDate)
+      ? daysBetween(
+          today(),
+          inventory.expiryDate
+        )
       : null;
 
-    const leadTime = product.supplier?.leadTimeDays;
+    const leadTime =
+      product.supplier?.leadTimeDays;
 
     const hasLeadTime =
       Number.isSafeInteger(leadTime) &&
@@ -460,13 +950,19 @@ class InventoryController {
         daysLeft <= leadTime
       );
 
-    // Resolve pending alerts if replenishment is no longer needed.
-    if (stockStatus === "IN_STOCK" && !expiryRisk) {
+    // Resolve alerts when they are no longer needed.
+    if (
+      stockStatus === "IN_STOCK" &&
+      !expiryRisk
+    ) {
       await RestockAlert.update(
-        { alertStatus: "RESOLVED" },
+        {
+          alertStatus: "RESOLVED",
+        },
         {
           where: {
-            inventoryId: inventory.inventoryId,
+            inventoryId:
+              inventory.inventoryId,
             alertStatus: "PENDING",
           },
           transaction,
@@ -476,31 +972,35 @@ class InventoryController {
       return null;
     }
 
-    // Find an existing pending alert.
-    const existing = await RestockAlert.findOne({
-      where: {
-        inventoryId: inventory.inventoryId,
-        alertStatus: "PENDING",
-      },
-      transaction,
-    });
+    // Refresh an existing pending alert.
+    const existing =
+      await RestockAlert.findOne({
+        where: {
+          inventoryId:
+            inventory.inventoryId,
+          alertStatus: "PENDING",
+        },
+        transaction,
+      });
 
     if (existing) {
-      // NEW: Refresh the existing alert instead of reusing
-      // its outdated recommended quantity and message.
-      await existing.generateRestockAlert({ transaction });
+      await existing.generateRestockAlert({
+        transaction,
+      });
 
-      // Preserve the existing alertId and avoid duplicates.
       return existing;
     }
 
-    // No pending alert exists, so create a new one.
+    // Create a new pending alert.
     const alert = RestockAlert.build({
       alertId: generateId("ALERT"),
-      inventoryId: inventory.inventoryId,
+      inventoryId:
+        inventory.inventoryId,
     });
 
-    await alert.generateRestockAlert({ transaction });
+    await alert.generateRestockAlert({
+      transaction,
+    });
 
     return alert;
   }
