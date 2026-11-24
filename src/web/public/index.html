@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Marché Aghapy — Back Office</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%276%27 fill=%27%232f5fd0%27/%3E%3Ctext x=%2716%27 y=%2722%27 font-family=%27Arial%27 font-weight=%27700%27 font-size=%2717%27 text-anchor=%27middle%27 fill=%27white%27%3EM%3C/text%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Top bar (Milestone 6 wireframes: logo, back-office search, notifications, signed-in user) -->
+  <header class="topbar">
+    <a class="brand" href="#/dashboard" aria-label="Marché Aghapy, back office home">
+      <span class="brand-mark" aria-hidden="true">M</span>
+      <strong>Marché Aghapy</strong>
+      <span class="brand-sub">Back Office</span>
+    </a>
+    <form class="top-search" id="top-search" role="search">
+      <svg aria-hidden="true" viewBox="0 0 20 20"><circle cx="8.5" cy="8.5" r="5.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M13 13l4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      <input type="search" name="q" placeholder="Search the back office" aria-label="Search the back office">
+    </form>
+    <a class="bell" href="#/inventory/alerts" aria-label="Notifications" title="Restock alerts and owner notifications">
+      <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15L6 16z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 20a2 2 0 0 0 4 0" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+      <span class="bell-count hidden" id="bell-count"></span>
+    </a>
+    <div class="user">
+      <span class="avatar" aria-hidden="true">B</span>
+      <span class="user-text"><strong>Bassem</strong><small>Store Owner</small></span>
+    </div>
+  </header>
+
+  <div class="shell">
+    <!-- Left navigation (stays visible on every screen; current section highlighted) -->
+    <nav class="sidenav" aria-label="Main navigation">
+      <a href="#/dashboard" data-section="dashboard"><span class="box" aria-hidden="true"></span>Dashboard</a>
+      <a href="#/dashboard/reports" data-section="reports" class="sub"><span class="dot" aria-hidden="true"></span>Reports</a>
+      <a href="#/inventory" data-section="inventory"><span class="box" aria-hidden="true"></span>Products &amp; Inventory</a>
+      <a href="#/profiles" data-section="profiles"><span class="box" aria-hidden="true"></span>Supplier &amp; Customer Profiles</a>
+      <a href="#/accounting" data-section="accounting"><span class="box" aria-hidden="true"></span>Accounting</a>
+      <a href="#/schedule" data-section="schedule"><span class="box" aria-hidden="true"></span>Employee Schedule</a>
+      <a href="#/support" data-section="support"><span class="box" aria-hidden="true"></span>Customer Support</a>
+      <span class="team">Team 1 · BTM 495</span>
+    </nav>
+
+    <main id="main" tabindex="-1"></main>
+  </div>
+
+  <!-- Status bar -->
+  <footer class="statusbar" role="status" aria-live="polite">
+    <span id="status-text"><span class="sdot"></span>Ready</span>
+    <strong id="status-screen"></strong>
+  </footer>
+
+  <div id="toast" role="status" aria-live="polite"></div>
+  <div id="modal-root"></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

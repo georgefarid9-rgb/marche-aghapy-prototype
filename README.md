@@ -194,3 +194,16 @@ No local Milestone 6 wireframes were found in the tracked repository, so the int
 Feature 1 additions are `src/server.js`, `public/index.html`, `public/style.css`, `public/app.js`, `scripts/seedFeature1Demo.js`, and `scripts/verifyInventoryWeb.js`. `package.json` adds run scripts, and `src/controllers/InventoryController.js` checks supplier existence during updates. No other feature's schema was changed.
 
 The browser and expiry checks are in `scripts/verifyInventoryBrowser.js` and `scripts/verifyExpiryReconciliation.js`. Playwright is a development dependency; its browser must be installed separately. Reconciliation uses the project’s existing UTC date convention.
+
+## Web demo: all six features (Milestone 6 wireframes)
+
+A second browser interface covers all six features. Its screens follow the Milestone 6 Figma wireframes (1.1–1.5, 2.1–2.7, 3.1–3.5), and Features 3, 5 and 6 use the same layout. It runs next to the Feature 1 prototype above, on its own port, so the two do not interfere.
+
+1. Run `npm install` once (it adds Express, a small web server).
+2. Run `npm run demo`, then open **http://localhost:3001**.
+3. Press `Ctrl + C` to stop.
+
+- It uses its own database, `database/demo.sqlite`, with sample data matching the wireframes (Feta Cheese 400g, Hellenic Foods Inc., ...). It is created on the first run and never touches the team's main database. `npm run demo:reset` rebuilds it (run this before a presentation).
+- `npm run web:check` tests every screen's actions on a temporary database.
+- The screens call the same classes as the test scripts (`InventoryPage`, `ReportHandler`, `SchedulePage`, `BusinessPartner`, `Ledger`, `Employee`, ...), so the same validation rules apply. Server: `src/web/server.js`; routes: `src/web/api/`; pages: `src/web/public/`.
+- `DEMO_SCRIPT.md` lists what to click, in order, during the presentation.
