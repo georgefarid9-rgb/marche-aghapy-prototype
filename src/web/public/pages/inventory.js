@@ -12,7 +12,8 @@ import {
   busy, toast, dash, fmtDate, fmtDateTime, setStatus, todayText, paginate,
 } from "../ui.js";
 
-const USER = "Bassem";
+// "Updated by": the person chosen in "Signed in as" (top bar).
+const currentUserName = () => document.querySelector("#signed-in-as")?.selectedOptions[0]?.textContent.split(" — ")[0] || "Bassem";
 let lastSave = null; // result shown on wireframe 1.5
 let listState = { search: "", category: "", page: 1 };
 
@@ -289,7 +290,7 @@ async function showSaved(main, productId) {
     <div class="grid-2">${productInfoCard({ ...details.product, ...info.product }, details.supplierName)}${inventoryInfoCard(
       { ...inv, lastUpdated: inv.lastUpdated || details.product?.inventoryRecord?.lastUpdated },
       info.stockStatus,
-      USER
+      currentUserName()
     )}</div>
     <div class="form-actions" style="justify-content:space-between;margin-top:20px">
       <a class="button" href="#/inventory">Back to Inventory</a>

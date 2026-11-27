@@ -2,7 +2,8 @@
 // highlighted). Routes look like #/inventory/PROD-002/edit: the first part picks the page,
 // the rest is passed to it.
 
-import { $, $$, api } from "./ui.js";
+import { $, $$, api, toast, signedInAs, setSignedInAs, OWNER_ID } from "./ui.js";
+import { currentLang, setLang, startTranslation, t } from "./i18n.js";
 import dashboard from "./pages/dashboard.js";
 import inventory from "./pages/inventory.js";
 import profiles from "./pages/profiles.js";
@@ -67,5 +68,57 @@ $("#top-search").addEventListener("submit", (event) => {
   location.hash = `#/inventory/search/${encodeURIComponent(q)}`;
 });
 
+// ----- Errors nothing else caught: show them with the file and line -----
+// "(Error in src/web/public/pages/support.js, line 120)"
+function whereFrom(url, line) {
+  const match = String(url || "").match(/\/((?:pages\/)?[\w.-]+\.js)(?:\?.*)?$/);
+  return match && line ? ` (Error in src/web/public/${match[1]}, line ${line})` : "";
+}
+function frameOf(stack) {
+  const match = String(stack || "").match(/(https?:\/\/[^\s)]+\.js):(\d+):\d+/);
+  return match ? whereFrom(match[1], match[2]) : "";
+}
+window.addEventListener("error", (event) => {
+  if (!event.message) return;
+  toast(`${t("Unexpected error")}: ${event.message}${whereFrom(event.filename, event.lineno)}`, "error");
+});
+window.addEventListener("unhandledrejection", (event) => {
+  const reason = event.reason || {};
+  toast(`${t("Unexpected error")}: ${reason.message || reason}${frameOf(reason.stack)}`, "error");
+});
+
+// ----- Language (EN | FR) -----
+$$("[data-lang]").forEach((button) => {
+  button.setAttribute("aria-pressed", String(button.dataset.lang === currentLang()));
+  button.addEventListener("click", () => {
+    if (button.dataset.lang === currentLang()) return;
+    setLang(button.dataset.lang);
+    location.reload();
+  });
+});
+
+// ----- "Signed in as" (demo role switch, kept per browser tab) -----
+async function setUpSignedIn() {
+  const select = $("#signed-in-as");
+  select.setAttribute("aria-label", t("Signed in as"));
+  const result = await api("GET", "/support/employees");
+  const owner = t("Store Owner");
+  const employee = t("Employee");
+  select.innerHTML = [
+    `<option value="${OWNER_ID}">Bassem — ${owner}</option>`,
+    ...(result.employees || []).map((e) => `<option value="${e.employeeId}">${e.employeeName} — ${employee}</option>`),
+  ].join("");
+  if (![...select.options].some((o) => o.value === signedInAs())) setSignedInAs(OWNER_ID);
+  select.value = signedInAs();
+  const updateAvatar = () => ($("#user-avatar").textContent = select.selectedOptions[0]?.textContent.trim()[0] || "?");
+  updateAvatar();
+  select.addEventListener("change", () => {
+    setSignedInAs(select.value);
+    updateAvatar();
+    show(); // redraw the current screen for the new person
+  });
+}
+
+startTranslation();
 window.addEventListener("hashchange", show);
-show();
+setUpSignedIn().finally(show);

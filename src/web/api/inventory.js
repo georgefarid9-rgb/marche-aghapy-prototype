@@ -6,6 +6,7 @@ const express = require("express");
 const InventoryPage = require("../../pages/InventoryPage");
 const { Supplier, BusinessPartner, StoreOwner, Product, RestockAlert } = require("../../models");
 const { route } = require("./respond");
+const { reconcileAlerts, exclusiveDatabaseWork } = require("../../utils/alertReconciliation");
 
 const router = express.Router();
 
@@ -43,6 +44,7 @@ async function supplierNames() {
 router.get(
   "/",
   route(async (req, res) => {
+    await reconcileAlerts(); // expiry can change with the date alone
     const page = new InventoryPage();
     await page.beginInventoryReview();
     const products = await Product.findAll();
@@ -78,6 +80,7 @@ router.get(
 router.get(
   "/alerts",
   route(async (req, res) => {
+    await reconcileAlerts();
     const owner = await StoreOwner.findByPk("OWN-001");
     const alerts = await owner.reviewRestockAlert();
     res.json({
@@ -93,6 +96,7 @@ router.get(
 router.get(
   "/:productId",
   route(async (req, res) => {
+    await reconcileAlerts();
     const page = new InventoryPage();
     page.selectedTask = "UPDATE";
     page.selectedProductId = req.params.productId;
@@ -129,7 +133,8 @@ router.put(
     }
     page.formData = formDataFrom(req.body);
     page.provideProductAndInventoryChanges();
-    await page.submitProductInformation();
+    // Saves wait for any reconciliation in progress (one writer at a time).
+    await exclusiveDatabaseWork(() => page.submitProductInformation());
     if (page.view === "CORRECTION_REQUIRED") {
       res.status(400).json({ ok: false, message: page.errorMessage });
       return;
@@ -148,7 +153,7 @@ router.post(
     await page.selectMaintenanceTask();
     page.formData = formDataFrom(req.body);
     page.provideProductQuantityExpiry();
-    await page.submitProductInformation();
+    await exclusiveDatabaseWork(() => page.submitProductInformation());
     if (page.view === "CORRECTION_REQUIRED") {
       res.status(400).json({ ok: false, message: page.errorMessage });
       return;

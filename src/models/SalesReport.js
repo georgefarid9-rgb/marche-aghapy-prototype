@@ -30,7 +30,7 @@ class SalesReport extends ReportBase {
       { key: "customerId", label: "Customer" },
       { key: "employeeId", label: "Employee" },
       { key: "unitsSold", label: "Units" },
-      { key: "totalAmount", label: "Total (gross)" },
+      { key: "totalAmount", label: "Total (gross, CAD)" },
     ];
   }
 
@@ -81,9 +81,9 @@ class SalesReport extends ReportBase {
 
   getSummaryLines() {
     return [
-      `Total sales (gross, before returns): $${Number(this.totalSalesAmount).toFixed(2)}`,
+      `Total sales (gross, before returns): $${Number(this.totalSalesAmount).toFixed(2)} CAD`,
       `Number of sales: ${this.numberOfSales}`,
-      `Average sale: $${Number(this.averageSaleAmount).toFixed(2)}`,
+      `Average sale: $${Number(this.averageSaleAmount).toFixed(2)} CAD`,
     ];
   }
 

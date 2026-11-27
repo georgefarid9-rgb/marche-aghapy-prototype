@@ -17,6 +17,7 @@ const {
   Ledger,
   Revenue,
   Expense,
+  SaleItem,
 } = require("../src/models");
 const InventoryController = require("../src/controllers/InventoryController");
 const ScheduleController = require("../src/controllers/ScheduleController");
@@ -73,8 +74,130 @@ async function createProduct(controller, details) {
   }
 }
 
+
+// ----- Feature 2: sales that match each day's register total -----
+//
+// The Dashboard tile, the "Sales – last 7 days" chart and the Sales Report read Sale
+// records, while Accounting holds each day's register total ("Daily sales" revenue).
+// For every such day, seedSalesForDay() creates 15 to 40 realistic sales whose totals add
+// up to that register total to the cent, so every screen shows the same figures.
+// Rows are inserted directly (bulkCreate): seeding history must not change stock levels.
+
+// Shelf prices in CAD. PROD-001, PROD-002 and PROD-008 use the unit prices already on
+// SALE-001 and SALE-002.
+const UNIT_PRICES = {
+  "PROD-001": 2.5, "PROD-002": 8.99, "PROD-003": 6.99, "PROD-004": 3.49, "PROD-005": 7.49,
+  "PROD-006": 16.99, "PROD-007": 7.99, "PROD-008": 6.49, "PROD-009": 6.29, "PROD-010": 4.99,
+  "PROD-011": 9.49, "PROD-012": 6.79, "PROD-013": 8.49, "PROD-014": 5.99,
+};
+const PRODUCT_IDS = Object.keys(UNIT_PRICES);
+const PAYMENT_METHODS = ["Debit", "Debit", "Credit", "Credit", "Cash"];
+const CASHIERS = ["EMP-001", "EMP-001", "EMP-003"];
+const KNOWN_CUSTOMERS = ["CUST-001", "CUST-002", "CUST-003"];
+
+// Small repeatable random generator, so every demo reset builds the same sales.
+function randomGenerator(seed) {
+  let state = seed >>> 0;
+  return () => {
+    state = (state * 1664525 + 1013904223) >>> 0;
+    return state / 2 ** 32;
+  };
+}
+
+// The fewest items (product, quantity) whose prices add up to exactly `cents`, or null.
+function exactBasket(cents) {
+  const prices = PRODUCT_IDS.map((id) => Math.round(UNIT_PRICES[id] * 100));
+  const best = new Array(cents + 1).fill(Infinity);
+  const choice = new Array(cents + 1).fill(-1);
+  best[0] = 0;
+  for (let amount = 1; amount <= cents; amount += 1) {
+    prices.forEach((price, index) => {
+      if (price <= amount && best[amount - price] + 1 < best[amount]) {
+        best[amount] = best[amount - price] + 1;
+        choice[amount] = index;
+      }
+    });
+  }
+  if (best[cents] === Infinity) return null;
+  const counts = {};
+  for (let amount = cents; amount > 0; amount -= prices[choice[amount]]) {
+    const id = PRODUCT_IDS[choice[amount]];
+    counts[id] = (counts[id] || 0) + 1;
+  }
+  return Object.entries(counts).map(([productId, quantity]) => ({ productId, quantity }));
+}
+
+function basketCents(items) {
+  return items.reduce((sum, item) => sum + item.quantity * Math.round(UNIT_PRICES[item.productId] * 100), 0);
+}
+
+// Baskets for one day: random baskets until a little is left, then one last basket
+// that matches the remainder exactly.
+function basketsForDay(totalCents, random) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const baskets = [];
+    let remaining = totalCents;
+    while (remaining > 16000) {
+      const lines = 2 + Math.floor(random() * 6);
+      const items = [];
+      for (const productId of [...PRODUCT_IDS].sort(() => random() - 0.5).slice(0, lines)) {
+        items.push({ productId, quantity: 1 + Math.floor(random() * 3) });
+      }
+      const cents = basketCents(items);
+      if (cents <= remaining - 4000) {
+        baskets.push(items);
+        remaining -= cents;
+      } else if (cents > remaining) {
+        continue;
+      } else {
+        break;
+      }
+    }
+    const last = exactBasket(remaining);
+    if (last) {
+      baskets.push(last);
+      if (baskets.length >= 15 && baskets.length <= 40) return baskets;
+    }
+  }
+  throw new Error(`Could not build sales for a register total of ${totalCents / 100}.`);
+}
+
+async function seedSalesForDay(date, registerTotal, { customerFor } = {}) {
+  const totalCents = Math.round(registerTotal * 100);
+  const random = randomGenerator(Number(date.replace(/-/g, "")));
+  const baskets = basketsForDay(totalCents, random);
+  const sales = [];
+  const items = [];
+  baskets.forEach((basket, index) => {
+    const saleId = `SALE-${date.replace(/-/g, "")}-${String(index + 1).padStart(2, "0")}`;
+    const forced = customerFor ? customerFor(index) : undefined;
+    sales.push({
+      saleId,
+      saleDate: date,
+      totalAmount: basketCents(basket) / 100,
+      paymentMethod: PAYMENT_METHODS[Math.floor(random() * PAYMENT_METHODS.length)],
+      customerId: forced !== undefined ? forced : random() < 0.08 ? KNOWN_CUSTOMERS[Math.floor(random() * KNOWN_CUSTOMERS.length)] : null,
+      employeeId: CASHIERS[Math.floor(random() * CASHIERS.length)],
+    });
+    for (const item of basket) {
+      items.push({ saleId, productId: item.productId, quantity: item.quantity, unitPrice: UNIT_PRICES[item.productId] });
+    }
+  });
+  const check = sales.reduce((sum, sale) => sum + Math.round(sale.totalAmount * 100), 0);
+  if (check !== totalCents) {
+    throw new Error(`Sales for ${date} add up to ${check / 100}, not ${registerTotal}.`);
+  }
+  await Sale.bulkCreate(sales);
+  await SaleItem.bulkCreate(items);
+  return sales;
+}
+
 async function seedDemoData() {
   try {
+    // Demo data is only for the demo database, never the team's main database.
+    if (/marche-aghapy\.sqlite$/.test(String(sequelize.options.storage))) {
+      throw new Error("Demo data is only added to a demo or test database (run npm run demo:reset).");
+    }
     await sequelize.authenticate();
 
     if (await Supplier.findByPk("SUP-002")) {
@@ -122,6 +245,16 @@ async function seedDemoData() {
       phoneNumber: "438-555-0142",
       email: "youssef.g@example.com",
       createdDate: daysFromToday(-12),
+    });
+
+    // Feature 6 rejection path: a customer with no phone number (look-up by ID only).
+    await createCustomer({
+      partnerId: "BP-008",
+      customerId: "CUST-004",
+      name: "Rania Saleh",
+      phoneNumber: null,
+      email: "rania.saleh@example.com",
+      createdDate: daysFromToday(-60),
     });
 
     // ----- Feature 1: products and inventory (the products in wireframes 1.1 and 2.3) -----
@@ -267,6 +400,9 @@ async function seedDemoData() {
       [Expense, "TXN-DEMO-102", -2, 214.6, "Utilities", "Hydro-Québec", "Electricity – November"],
       [Expense, "TXN-DEMO-103", -1, 1180.0, "Supplier payment", "Hellenic Foods Inc.", "Hellenic Foods invoice #4471"]
     );
+    // Feature 6 rejection path: a sale older than the 30-day return window. Its day also
+    // gets a register total, so (as Feature 2 requires) every day with sales has one.
+    entries.push([Revenue, "TXN-DEMO-045", -45, 1874.25, "Daily sales", "Register", `${weekday(-45)} register total`]);
     for (const [TransactionClass, transactionId, day, amount, category, source, description] of entries) {
       const entry = TransactionClass.build({
         transactionId,
@@ -279,6 +415,43 @@ async function seedDemoData() {
       });
       entry.categorize();
       await ledger.addTransaction(entry);
+    }
+
+    // ----- Feature 2: sales for every "Daily sales" register total in Accounting -----
+    for (const [TransactionClass, , day, amount, category] of entries) {
+      if (TransactionClass !== Revenue || category !== "Daily sales") continue;
+      await seedSalesForDay(daysFromToday(day), amount, {
+        // Feature 6 demo: the first sale 45 days ago is Mariam Hanna's (CUST-002), so her
+        // return is refused (outside the 30-day window); the first sale 2 days ago is
+        // Youssef Girgis's (CUST-003), and one of its items is fully returned below.
+        customerFor: { [-45]: "CUST-002", [-2]: "CUST-003" }[day]
+          ? (index) => (index === 0 ? { [-45]: "CUST-002", [-2]: "CUST-003" }[day] : undefined)
+          : undefined,
+      });
+    }
+
+    // ----- Feature 6 rejection path: an item that was already fully returned -----
+    const firstSale = await Sale.findOne({
+      where: { customerId: "CUST-003", saleDate: daysFromToday(-2) },
+      include: [{ association: "items" }],
+      order: [["saleId", "ASC"]],
+    });
+    const fullyReturned = firstSale ? firstSale.items[0] : null;
+    if (!fullyReturned) {
+      throw new Error("The demo sale for the fully returned item was not created.");
+    }
+    {
+      const clerk = await Employee.findByPk("EMP-001");
+      const result = await clerk.requestReturn(
+        "CUST-003",
+        firstSale.saleId,
+        fullyReturned.saleItemId,
+        fullyReturned.quantity,
+        "Damaged product"
+      );
+      if (!result.refunded) {
+        throw new Error(`Demo return was not refunded: ${result.reason}`);
+      }
     }
 
     console.log("Demo data added.");

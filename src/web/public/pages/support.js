@@ -1,33 +1,60 @@
 // Feature 6 — Customer Support (use case 6).
-// The employee looks up a customer (ID or phone), then handles complaints, support
-// requests and returns; escalated cases go to the store owner. Calls /api/support.
+// The employee looks up a customer (ID or digits-only phone), then handles complaints,
+// support requests and returns; escalated cases go to the store owner's inbox.
+// Who is acting comes from "Signed in as" in the top bar: an employee assists customers,
+// the store owner works the inbox. The server checks the role on every request.
+// Calls /api/support.
 
 import {
   api, esc, $, $$, banner, pill, table, field, formValues, showFormErrors, clearFormErrors,
-  pageHeader, busy, toast, money, dash, setStatus, fmtDate,
+  pageHeader, busy, toast, money, dash, setStatus, fmtDate, stat, signedInAs, OWNER_ID,
 } from "../ui.js";
 
 export default async function support(main) {
-  const state = { employeeId: "EMP-001", employees: [], lookup: null, query: "", panel: null, returnItem: null };
+  const isOwner = signedInAs() === OWNER_ID;
+  const state = { lookup: null, query: "", panel: null, returnItem: null };
 
   main.innerHTML = `
-    ${pageHeader("Customer Support", "Look up a customer, then handle questions, complaints and returns.", '<label class="field" style="flex-direction:row;align-items:center;gap:8px">Acting employee <select id="employee" style="width:180px"></select></label>', [["Customer Support"]])}
-    <section class="card">
+    ${pageHeader("Customer Support", "Look up a customer, then handle questions, complaints and returns.", "", [["Customer Support"]])}
+    ${
+      isOwner
+        ? banner("info", "Signed in as the store owner", 'Customer look-ups, complaints, requests and returns are done by an employee. Switch "Signed in as" (top bar) to an employee to assist a customer.')
+        : `<section class="card">
       <div class="card-body">
-        <form id="lookup-form" class="toolbar" style="display:flex;margin:0">
-          <input name="customer" type="search" placeholder="Customer ID (CUST-002) or phone (514-555-0311)" aria-label="Customer ID or phone number" style="min-width:420px">
+        <form id="lookup-form" class="toolbar" style="display:flex;margin:0;align-items:flex-start" novalidate>
+          <label class="field" style="margin:0;flex:0 1 460px"><input name="customer" type="search" placeholder="Customer ID (CUST-002) or phone, digits only (5145550311)" aria-label="Customer ID or phone number" maxlength="20"></label>
           <button class="primary" type="submit">Look up customer</button>
         </form>
       </div>
-    </section>
+    </section>`
+    }
     <div id="result"></div>
     <section class="card" id="owner" style="margin-top:16px"></section>`;
 
+  // Owner inbox: a count for each section and the overall total.
   async function loadOwner() {
-    const result = await api("GET", "/support/owner/cases");
+    if (!isOwner) {
+      $("#owner").innerHTML = `<div class="card-body">${banner("info", "Owner inbox", 'The owner inbox is for the store owner. Switch "Signed in as" (top bar) to the store owner to see it.')}</div>`;
+      return;
+    }
+    const result = await api("GET", "/support/owner/inbox");
+    if (!result.ok) {
+      $("#owner").innerHTML = `<div class="card-body">${banner("error", result.message)}</div>`;
+      return;
+    }
+    const n = result.totals;
+    setStatus(`${n.total} waiting`, n.total ? "warn" : "ok");
     $("#owner").innerHTML = `
-      <div class="card-head"><div><h2>Store owner: escalated cases</h2><p>Complaints escalated by employees, and missing-record flags.</p></div></div>
+      <div class="card-head"><div><h2>Owner inbox</h2><p>Escalated complaints, missing records, delivery notices and restock alerts waiting for the store owner.</p></div></div>
       <div class="card-body">
+        <div class="stats" id="inbox-totals" style="grid-template-columns:repeat(5,minmax(0,1fr))">
+          ${stat("Escalated complaints", n.escalatedComplaints)}
+          ${stat("Missing records", n.missingRecords)}
+          ${stat("Delivery notices", n.deliveryNotices)}
+          ${stat("Restock alerts", n.restockAlerts)}
+          ${stat("Total waiting", n.total, "", n.total ? "warn" : "ok")}
+        </div>
+        <h3 style="margin:14px 0 6px">Escalated complaints</h3>
         ${table(
           [
             { label: "Case", render: (c) => `<span class="mono">${esc(c.caseId)}</span>` },
@@ -39,25 +66,46 @@ export default async function support(main) {
           result.cases,
           "No escalated cases waiting for review."
         )}
-        ${(result.missingRecords || []).length ? `<h3 style="margin:14px 0 6px">Missing-record flags</h3><ul class="list">${result.missingRecords
-          .map((r) => `<li><span>${esc(r.description)}</span><small class="muted">${fmtDate(r.requestDate)}</small></li>`)
-          .join("")}</ul>` : ""}
+        <h3 style="margin:14px 0 6px">Missing records</h3>
+        ${
+          result.missingRecords.length
+            ? `<ul class="list">${result.missingRecords
+                .map((r) => `<li><span>${esc(r.description)}</span><small class="muted">${fmtDate(r.requestDate)}</small></li>`)
+                .join("")}</ul>`
+            : '<p class="empty">No missing-record flags.</p>'
+        }
+        <h3 style="margin:14px 0 6px">Delivery notices</h3>
+        ${
+          result.deliveryNotices.length
+            ? `<ul class="list">${result.deliveryNotices
+                .map((d) => `<li><span>${pill(d.notificationType === "Discrepancy" ? "Discrepancy" : "Unplanned")} ${esc(d.message)}</span></li>`)
+                .join("")}</ul>`
+            : '<p class="empty">No delivery notices.</p>'
+        }
+        <h3 style="margin:14px 0 6px">Restock alerts</h3>
+        ${
+          result.restockAlerts.length
+            ? `<p><a class="link" href="#/inventory/alerts">${result.restockAlerts.length} pending restock alert${result.restockAlerts.length === 1 ? "" : "s"}</a></p>`
+            : '<p class="empty">No pending restock alerts.</p>'
+        }
       </div>`;
     $$("[data-resolve]").forEach((button) =>
       button.addEventListener("click", async () => {
         const res = await busy(button, () => api("POST", `/support/owner/cases/${encodeURIComponent(button.dataset.resolve)}/resolve`));
         toast(res.message, res.ok ? "success" : "error");
         await loadOwner();
-        if (state.lookup) await lookup(state.query);
       })
     );
   }
 
   async function lookup(query) {
     state.query = query;
-    const result = await api("POST", "/support/assist", { customer: query, employeeId: state.employeeId });
+    const form = $("#lookup-form");
+    clearFormErrors(form);
+    const result = await busy(form.querySelector("button[type=submit]"), () => api("POST", "/support/assist", { customer: query }));
     if (!result.ok) {
-      $("#result").innerHTML = banner("error", result.message);
+      if (result.fieldErrors) showFormErrors(form, result);
+      $("#result").innerHTML = result.fieldErrors ? "" : banner("error", result.message);
       return;
     }
     state.lookup = result;
@@ -74,19 +122,18 @@ export default async function support(main) {
       box.innerHTML = `<section class="card"><div class="card-body">
         ${banner("warning", `${r.message} You can flag the missing record for the store owner.`)}
         <form id="flag-form" novalidate>
-          ${field("note", "Note for the owner", { type: "textarea", required: true, placeholder: "e.g. Customer says they signed up last month; no account found." })}
+          ${field("note", "Note for the owner", { type: "textarea", required: true, placeholder: "e.g. Customer says they signed up last month; no account found.", attrs: 'maxlength="500"' })}
           <div class="form-message"></div>
           <div class="form-actions"><button class="primary" type="submit">Flag missing record</button></div>
         </form></div></section>`;
       $("#flag-form").addEventListener("submit", async (event) => {
         event.preventDefault();
         const res = await busy(event.target.querySelector("button[type=submit]"), () =>
-          api("POST", "/support/missing-record", { customer: r.customerId, note: formValues(event.target).note, employeeId: state.employeeId })
+          api("POST", "/support/missing-record", { customer: r.customerId, note: formValues(event.target).note })
         );
         if (!res.ok) return showFormErrors(event.target, res);
         toast(res.message);
         box.innerHTML = banner("success", res.message);
-        loadOwner();
       });
       return;
     }
@@ -160,10 +207,9 @@ export default async function support(main) {
     );
     $$("[data-escalate]", box).forEach((b) =>
       b.addEventListener("click", async () => {
-        const res = await busy(b, () => api("POST", `/support/complaints/${encodeURIComponent(b.dataset.escalate)}/escalate`, { employeeId: state.employeeId }));
+        const res = await busy(b, () => api("POST", `/support/complaints/${encodeURIComponent(b.dataset.escalate)}/escalate`, {}));
         toast(res.message, res.ok ? "success" : "error");
         await lookup(state.query);
-        loadOwner();
       })
     );
     $$("[data-note]", box).forEach((b) =>
@@ -189,14 +235,14 @@ export default async function support(main) {
       title = "New complaint case";
       body = `<form id="p-form" novalidate>
         ${field("category", "Category", { type: "select", required: true, options: ["Product quality", "Service", "Pricing", "Other"].map((v) => ({ value: v, label: v })) })}
-        ${field("description", "Description", { type: "textarea", required: true })}
+        ${field("description", "Description", { type: "textarea", required: true, attrs: 'maxlength="500"' })}
         <div class="form-message"></div>
         <div class="form-actions"><button type="button" id="p-cancel">Cancel</button><button class="primary" type="submit">Open case</button></div></form>`;
     } else if (state.panel === "request") {
       title = "New support request";
       body = `<form id="p-form" novalidate>
-        ${field("subject", "Subject", { required: true })}
-        ${field("description", "Description", { type: "textarea", required: true })}
+        ${field("subject", "Subject", { required: true, attrs: 'maxlength="100"' })}
+        ${field("description", "Description", { type: "textarea", required: true, attrs: 'maxlength="500"' })}
         <div class="form-message"></div>
         <div class="form-actions"><button type="button" id="p-cancel">Cancel</button><button class="primary" type="submit">Open request</button></div></form>`;
     } else if (state.panel === "return") {
@@ -206,13 +252,13 @@ export default async function support(main) {
         <dt>Bought</dt><dd>${esc(i.quantity)} × ${money(i.unitPrice)}</dd><dt>Already returned</dt><dd>${esc(i.returnedQuantity)}</dd></dl>
         <form id="p-form" novalidate>
         ${field("quantity", "Quantity to return", { type: "number", value: 1, required: true, attrs: `min="1" max="${i.quantity - i.returnedQuantity}" step="1"` })}
-        ${field("reason", "Reason", { value: "Damaged product", required: true })}
+        ${field("reason", "Reason", { value: "Damaged product", required: true, attrs: 'maxlength="200"' })}
         <div class="form-message"></div>
         <div class="form-actions"><button type="button" id="p-cancel">Cancel</button><button class="primary" type="submit">Check eligibility &amp; refund</button></div></form>`;
     } else if (state.panel && state.panel.note) {
       title = `Add a note to ${state.panel.note}`;
       body = `<form id="p-form" novalidate>
-        ${field("text", "Note", { type: "textarea", required: true })}
+        ${field("text", "Note", { type: "textarea", required: true, attrs: 'maxlength="500"' })}
         <div class="form-message"></div>
         <div class="form-actions"><button type="button" id="p-cancel">Cancel</button><button class="primary" type="submit">Save note</button></div></form>`;
     }
@@ -227,7 +273,7 @@ export default async function support(main) {
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       clearFormErrors(form);
-      const values = { ...formValues(form), employeeId: state.employeeId, customerId: c.customerId };
+      const values = { ...formValues(form), customerId: c.customerId };
       let res;
       const button = form.querySelector("button[type=submit]");
       if (state.panel === "complaint") res = await busy(button, () => api("POST", "/support/complaints", values));
@@ -247,15 +293,12 @@ export default async function support(main) {
   }
 
   // ----- Start -----
-  setStatus("Look up a customer by ID or phone number");
-  const employees = await api("GET", "/support/employees");
-  state.employees = employees.employees || [];
-  $("#employee").innerHTML = state.employees.map((e) => `<option value="${esc(e.employeeId)}">${esc(e.employeeName)}</option>`).join("");
-  $("#employee").addEventListener("change", (event) => (state.employeeId = event.target.value));
-  $("#lookup-form").addEventListener("submit", (event) => {
-    event.preventDefault();
-    const q = formValues(event.target).customer.trim();
-    if (q) lookup(q);
-  });
+  if (!isOwner) {
+    setStatus("Look up a customer by ID or phone number");
+    $("#lookup-form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      lookup(formValues(event.target).customer.trim());
+    });
+  }
   await loadOwner();
 }

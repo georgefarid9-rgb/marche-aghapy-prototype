@@ -61,6 +61,10 @@ a { color: var(--blue); }
 .user-text { display: flex; flex-direction: column; line-height: 1.2; }
 .user-text strong { font-size: 12px; font-weight: 600; }
 .user-text small { font-size: 11px; color: #9ca3af; }
+.user-text select { height: 24px; padding: 0 4px; border-radius: 4px; border: 1px solid #3a4253; background: var(--top-2); color: #fff; font: inherit; font-size: 12px; max-width: 210px; }
+.lang-switch { display: flex; border: 1px solid #3a4253; border-radius: 5px; overflow: hidden; }
+.lang-switch button { height: 26px; padding: 0 8px; border: 0; border-radius: 0; background: none; color: #9ca3af; font: inherit; font-size: 11px; font-weight: 600; cursor: pointer; }
+.lang-switch button[aria-pressed="true"] { background: var(--blue); color: #fff; }
 
 /* ----- Layout ----- */
 .shell { flex: 1; display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: 0; }
@@ -269,7 +273,8 @@ tbody tr.selected, tbody tr.highlight { background: var(--blue-50); }
   .shell { grid-template-columns: 1fr; }
   .sidenav { position: static; height: auto; flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line); }
   .sidenav a { white-space: nowrap; }
-  .team, .user-text, .brand-sub { display: none; }
+  .team, .user-text small, .brand-sub, .avatar { display: none; }
+  .user-text select { max-width: 120px; }
   .form-grid { grid-template-columns: 1fr; }
 }
 

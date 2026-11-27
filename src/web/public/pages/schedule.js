@@ -22,9 +22,17 @@ export default async function schedule(main) {
       <section class="card" id="panel" style="margin-top:0" aria-live="polite"></section>
     </div>`;
 
+  // Every answer carries the employee and schedule lists. If the server cannot be
+  // reached (no lists in the answer), keep the screen as it was and show the error.
   async function act(method, url, body, button) {
-    view = await busy(button, () => api(method, url, body));
+    const result = await busy(button, () => api(method, url, body));
+    if (!result.employees) {
+      view = { ...view, errorMessage: result.message || "The request failed. Please try again.", promptMessage: null, confirmationMessage: null };
+    } else {
+      view = result;
+    }
     render();
+    return result;
   }
 
   function messages() {
@@ -43,6 +51,11 @@ export default async function schedule(main) {
     { label: "Status", render: (s) => pill(s.shiftStatus) },
     ...(editable ? [{ label: "", render: (s) => (s.shiftStatus === "Cancelled" ? "" : `<button class="small" data-shift="${esc(s.shiftId)}">Edit</button>`) }] : []),
   ];
+
+  // The shift being edited, named by employee and shift ID (never "the last selected one").
+  function shiftUrl(d) {
+    return `/schedule/employees/${encodeURIComponent(view.selectedEmployee.employeeId)}/shifts/${encodeURIComponent(d.shiftId)}`;
+  }
 
   function nameOf(employeeId) {
     return (view.employees || []).find((e) => e.employeeId === employeeId)?.employeeName || employeeId;
@@ -111,9 +124,9 @@ export default async function schedule(main) {
       }
       $("#shift-form").addEventListener("submit", (event) => {
         event.preventDefault();
-        act("PUT", "/schedule/shift", formValues(event.target), event.target.querySelector("button[type=submit]"));
+        act("PUT", shiftUrl(d), { ...formValues(event.target), scheduleId: d.scheduleId }, event.target.querySelector("button[type=submit]"));
       });
-      $("#cancel-shift").addEventListener("click", (event) => act("POST", "/schedule/shift/cancel", null, event.currentTarget));
+      $("#cancel-shift").addEventListener("click", (event) => act("POST", `${shiftUrl(d)}/cancel`, { scheduleId: d.scheduleId }, event.currentTarget));
       $("#back").addEventListener("click", () => act("POST", `/schedule/employees/${encodeURIComponent(view.selectedEmployee.employeeId)}`));
       return;
     }
@@ -124,7 +137,9 @@ export default async function schedule(main) {
         <div class="card-head"><div><h2>${esc(view.selectedEmployee.employeeName)}</h2><p>${esc(view.selectedEmployee.role)} · ${esc(view.selectedEmployee.employeeId)}</p></div></div>
         <div class="card-body">${messages()}${table(shiftColumns(false, true), view.employeeSchedule, "No shifts assigned yet.")}</div>`;
       $$("[data-shift]", panel).forEach((button) =>
-        button.addEventListener("click", () => act("POST", `/schedule/shifts/${encodeURIComponent(button.dataset.shift)}/select`, null, button))
+        button.addEventListener("click", () =>
+          act("POST", `/schedule/employees/${encodeURIComponent(view.selectedEmployee.employeeId)}/shifts/${encodeURIComponent(button.dataset.shift)}/select`, null, button)
+        )
       );
       return;
     }
@@ -187,16 +202,12 @@ export default async function schedule(main) {
         const created = await busy(event.target.querySelector("button[type=submit]"), () =>
           api("POST", "/schedule/schedules", formValues(event.target))
         );
-        if (created.errorMessage || !created.selectedSchedule) {
-          view = created; // invalid dates: show the message on the form
-          render();
-          return;
+        if (!created.employees) {
+          view = { ...view, errorMessage: created.message || "The request failed. Please try again." };
+        } else {
+          view = created; // the answer already holds the new schedule and the updated lists
+          if (created.ok && created.selectedSchedule) mode = "schedule";
         }
-        const scheduleId = created.selectedSchedule.scheduleId;
-        await api("GET", "/schedule"); // refresh the lists so the new schedule appears
-        view = await api("GET", `/schedule/schedules/${encodeURIComponent(scheduleId)}`);
-        view.confirmationMessage = `Schedule ${scheduleId} created. Assign shifts, then publish it.`;
-        mode = "schedule";
         render();
       });
       return;
@@ -216,6 +227,7 @@ export default async function schedule(main) {
     act("GET", `/schedule/my/${encodeURIComponent(formValues(event.target).employeeId)}`);
   });
 
-  view = await api("GET", "/schedule");
+  const first = await api("GET", "/schedule");
+  view = first.employees ? first : { employees: [], schedules: [], errorMessage: first.message };
   render();
 }

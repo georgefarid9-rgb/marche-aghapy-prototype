@@ -65,10 +65,22 @@ class Employee extends Model {
       throw new Error(`Customer ${customerId} was not found, so no complaint case was created.`);
     }
 
+    // No duplicates: the same complaint for the same customer that is still open
+    // (or waiting for the owner) is not opened a second time.
+    const { Op } = require("sequelize");
+    const category = typeof details.category === "string" ? details.category.trim() : details.category;
+    const description = typeof details.description === "string" ? details.description.trim() : details.description;
+    const duplicate = await ComplaintCase.findOne({
+      where: { customerId, category, description, status: { [Op.in]: ["Open", "Pending Owner Review"] } },
+    });
+    if (duplicate) {
+      throw new Error(`An identical complaint is already open for ${customerId} (${duplicate.caseId}).`);
+    }
+
     const complaint = ComplaintCase.build({
       caseId: details.caseId || generateId("CASE"),
-      category: details.category,
-      description: details.description,
+      category,
+      description,
       customerId,
       employeeId: this.employeeId,
     });
@@ -160,6 +172,18 @@ class Employee extends Model {
       throw new Error("A note is required to flag a missing record.");
     }
 
+    // Flagging the same missing record twice returns the flag that is already open.
+    const existing = await SupportRequest.findOne({
+      where: {
+        subject: "Missing record",
+        requestStatus: "Open",
+        description: { [require("sequelize").Op.like]: `Missing record for ${customerId}:%` },
+      },
+    });
+    if (existing) {
+      return existing;
+    }
+
     const customer = await this.searchAccount(customerId);
     return SupportRequest.create({
       requestId: generateId("REQ"),
@@ -178,6 +202,14 @@ class Employee extends Model {
 
     if (!(await this.searchAccount(customerId))) {
       throw new Error(`Customer ${customerId} was not found, so no support request was created.`);
+    }
+
+    // No duplicates: an identical request for the same customer that is still open.
+    const duplicate = await SupportRequest.findOne({
+      where: { customerId, subject, description: description ?? null, requestStatus: "Open" },
+    });
+    if (duplicate) {
+      throw new Error(`An identical support request is already open for ${customerId} (${duplicate.requestId}).`);
     }
 
     return SupportRequest.create({

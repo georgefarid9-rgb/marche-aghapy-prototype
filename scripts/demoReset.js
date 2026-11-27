@@ -16,8 +16,14 @@ const { execFileSync } = require("child_process");
 const ROOT = path.join(__dirname, "..");
 const DEMO_DATABASE = path.join("database", "demo.sqlite");
 
+const MAIN_DATABASE = path.join(ROOT, "database", "marche-aghapy.sqlite");
+
 function resetDemoDatabase() {
   const fullPath = path.join(ROOT, DEMO_DATABASE);
+  // Safety check: this script deletes a file, so make sure it can only ever be the demo one.
+  if (path.resolve(fullPath) === path.resolve(MAIN_DATABASE) || path.basename(fullPath) !== "demo.sqlite") {
+    throw new Error("demo:reset only rebuilds database/demo.sqlite.");
+  }
   fs.mkdirSync(path.dirname(fullPath), { recursive: true });
   for (const file of [fullPath, `${fullPath}-journal`]) {
     if (fs.existsSync(file)) {
@@ -36,7 +42,7 @@ if (require.main === module) {
   try {
     resetDemoDatabase();
   } catch (error) {
-    console.error("Demo reset failed.");
+    console.error(`Demo reset failed. ${error.message}`);
     process.exitCode = 1;
   }
 }

@@ -1,5 +1,7 @@
 // Small helpers shared by every page (no framework, no build step).
 
+import { currentLang } from "./i18n.js";
+
 // Escape text before putting it in HTML.
 export function esc(value) {
   return String(value ?? "")
@@ -10,19 +12,40 @@ export function esc(value) {
     .replace(/'/g, "&#39;");
 }
 
-// Call the server. Always resolves to the JSON body ({ ok, message, ... }).
+// Who is "signed in" (top bar). Kept per browser tab, so two windows can act as two
+// different people. This is a demo role switch, not a login.
+export const OWNER_ID = "OWN-001";
+export function signedInAs() {
+  try {
+    return sessionStorage.getItem("signedInAs") || OWNER_ID;
+  } catch {
+    return OWNER_ID;
+  }
+}
+export function setSignedInAs(id) {
+  try {
+    sessionStorage.setItem("signedInAs", id);
+  } catch {
+    /* storage unavailable: the choice lasts until the page is reloaded */
+  }
+}
+
+// Call the server. Always resolves to the JSON body ({ ok, message, status, ... }).
+// ok is true only for a 2xx answer, whatever the body says.
 export async function api(method, url, body) {
   try {
     const response = await fetch(`/api${url}`, {
       method,
-      headers: body ? { "Content-Type": "application/json" } : {},
+      headers: { "X-Signed-In-As": signedInAs(), ...(body ? { "Content-Type": "application/json" } : {}) },
       body: body ? JSON.stringify(body) : undefined,
     });
     const data = await response.json().catch(() => ({}));
-    if (data.ok === undefined) data.ok = response.ok;
+    data.ok = response.ok && data.ok !== false;
+    data.status = response.status;
+    if (!data.ok && !data.message) data.message = `The request failed (HTTP ${response.status}). Please try again.`;
     return data;
   } catch (error) {
-    return { ok: false, message: "The server is not responding. Is `npm run demo` still running?" };
+    return { ok: false, status: 0, message: "The server is not responding. Is `npm run demo` still running?" };
   }
 }
 
@@ -124,13 +147,26 @@ export function pill(value, label) {
   return `<span class="pill ${PILL_STYLES[value] || "muted"}">${esc(label || PILL_LABELS[value] || value)}</span>`;
 }
 
-export const money = (value) =>
-  value === null || value === undefined || Number.isNaN(Number(value))
-    ? "—"
-    : Number(value).toLocaleString("en-US", { style: "currency", currency: "USD" });
+// Money is in Canadian dollars (Marché Aghapy is in Québec). This only formats the
+// amount; nothing is converted. English: $2,012.85 CAD · French: 2 012,85 $ CA
+export function money(value) {
+  if (value === null || value === undefined || value === "" || Number.isNaN(Number(value))) return "—";
+  const french = currentLang() === "fr";
+  const text = Number(value).toLocaleString(french ? "fr-CA" : "en-CA", { style: "currency", currency: "CAD" });
+  return `${text}${french ? " CA" : " CAD"}`;
+}
 
-// +$1,234.50 / −$1,234.50
+// +$1,234.50 CAD / −$1,234.50 CAD
 export const signedMoney = (value) => `${value < 0 ? "−" : "+"}${money(Math.abs(value))}`;
+
+// A number in the reader's language (1,234 / 1 234).
+export const num = (value) => Number(value).toLocaleString(currentLang() === "fr" ? "fr-CA" : "en-CA");
+
+// Short weekday name in the reader's language ("Mon" / "lun.").
+export const weekdayShort = (dateText) =>
+  new Date(`${dateText}T12:00:00`).toLocaleDateString(currentLang() === "fr" ? "fr-CA" : "en-CA", { weekday: "short" });
+export const weekdayLong = (date = new Date()) =>
+  date.toLocaleDateString(currentLang() === "fr" ? "fr-CA" : "en-CA", { weekday: "long" });
 
 export const dash = (value) => (value === null || value === undefined || value === "" ? "—" : esc(value));
 
@@ -147,20 +183,16 @@ export function fmtDateTime(value) {
   if (!value) return "—";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return esc(value);
-  return `${date.toLocaleDateString("en-US", { month: "2-digit", day: "2-digit", year: "numeric" })} ${date.toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-  })}`;
+  return `${fmtDate(date.toLocaleDateString("en-CA"))} ${fmtTime(date)}`;
 }
 
 export function fmtTime(value = new Date()) {
-  return new Date(value).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  return new Date(value).toLocaleTimeString(currentLang() === "fr" ? "fr-CA" : "en-US", { hour: "numeric", minute: "2-digit" });
 }
 
-export const todayText = () => {
-  const now = new Date();
-  return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
-};
+// Today as "YYYY-MM-DD" in UTC, the same clock the server uses (src/utils/dates.js), so a
+// date the page fills in or checks never disagrees with the server's validation.
+export const todayText = () => new Date().toISOString().slice(0, 10);
 
 // A form field. options: { type, value, required, placeholder, hint, options:[{value,label}], attrs }
 export function field(name, label, options = {}) {

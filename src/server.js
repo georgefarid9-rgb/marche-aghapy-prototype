@@ -3,7 +3,6 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 
-const sequelize = require("./database");
 const {
   Product,
   InventoryRecord,
@@ -12,53 +11,13 @@ const {
 } = require("./models");
 
 const InventoryController = require("./controllers/InventoryController");
-const { today } = require("./utils/dates");
 
-// Reconcile alerts once per UTC day on the first inventory read.
-// Concurrent requests share the same reconciliation work.
-let reconciledDay = null;
-let reconciliation = null;
-let databaseQueue = Promise.resolve();
-
-function exclusiveDatabaseWork(work) {
-  const result = databaseQueue.then(work);
-  databaseQueue = result.catch(() => {});
-  return result;
-}
-
-async function reconcileAlerts() {
-  const day = today();
-
-  if (reconciledDay === day) return;
-
-  if (reconciliation) {
-    await reconciliation;
-    return reconcileAlerts();
-  }
-
-  reconciliation = exclusiveDatabaseWork(() =>
-    sequelize.transaction(async (transaction) => {
-      const records = await InventoryRecord.findAll({
-        transaction,
-      });
-
-      const controller = new InventoryController();
-
-      for (const record of records) {
-        await controller._tryGenerateAlert(record, {
-          transaction,
-        });
-      }
-    })
-  );
-
-  try {
-    await reconciliation;
-    reconciledDay = day;
-  } finally {
-    reconciliation = null;
-  }
-}
+// Alert reconciliation and the database write queue are shared with the six-feature
+// web demo (src/web/server.js), so both applications keep alerts accurate the same way.
+const {
+  reconcileAlerts,
+  exclusiveDatabaseWork,
+} = require("./utils/alertReconciliation");
 
 // Retrieve complete product details.
 async function detail(id) {

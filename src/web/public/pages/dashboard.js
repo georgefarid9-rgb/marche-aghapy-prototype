@@ -8,14 +8,14 @@
 
 import {
   api, esc, $, $$, banner, pill, field, formValues, pageHeader, busy, toast, money, stat, setStatus,
-  fmtDate, fmtDateTime, fmtTime, todayText, openModal,
+  fmtDate, fmtDateTime, fmtTime, todayText, openModal, num, weekdayShort, weekdayLong,
 } from "../ui.js";
+import { currentLang } from "../i18n.js";
 
 const REPORTS = [
   { type: "inventory", title: "Inventory Report", help: "Current quantity of every product and which products are low on stock" },
   { type: "sales", title: "Sales Report", help: "Sales totals by day, product and category" },
   { type: "expiryRestock", title: "Expiry & Restock Report", help: "Products expiring soon and products that need restocking" },
-  { type: "financial", title: "Financial Report", help: "Revenue, expenses and profit / loss (from Accounting)" },
 ];
 const titleOf = (type) => REPORTS.find((r) => r.type === type)?.title || "Report";
 const STATUS_ORDER = { OUT_OF_STOCK: 0, LOW_STOCK: 1, IN_STOCK: 2 };
@@ -38,8 +38,7 @@ async function showDashboard(main) {
     api("GET", "/inventory"),
   ]);
   const items = inv.inventory || [];
-  const today = new Date();
-  const dayName = today.toLocaleDateString("en-US", { weekday: "long" });
+  const dayName = weekdayLong(new Date(`${todayText()}T12:00:00`));
   setStatus(summary.ok ? `Data refreshed ${fmtTime()}` : "Dashboard data unavailable", summary.ok ? "" : "bad", "2.1");
 
   const attention = items
@@ -48,7 +47,12 @@ async function showDashboard(main) {
     .slice(0, 5);
   const days = week.days || [];
   const max = Math.max(1, ...days.map((d) => d.total));
-  const short = (n) => (n >= 1000 ? `$${(n / 1000).toFixed(1)}k` : `$${Math.round(n)}`);
+  // Short bar labels in CAD: $2.0k / 2,0 k$ (the caption says the chart is in CAD).
+  const fr = currentLang() === "fr";
+  const short = (n) =>
+    n >= 1000
+      ? fr ? `${(n / 1000).toFixed(1).replace(".", ",")} k$` : `$${(n / 1000).toFixed(1)}k`
+      : fr ? `${Math.round(n)} $` : `$${Math.round(n)}`;
 
   main.innerHTML = `
     ${pageHeader("Dashboard", `Store overview for ${dayName}, ${fmtDate(todayText())}`, '<a class="button primary" href="#/dashboard/reports">Reports</a>', [["Dashboard"]])}
@@ -62,15 +66,15 @@ async function showDashboard(main) {
     </div>
     <div class="split">
       <section class="card"><div class="card-head"><h2>Sales – last 7 days</h2></div><div class="card-body">
-        <div class="bars" role="img" aria-label="Daily sales revenue for the last 7 days">
+        <div class="bars" role="img" aria-label="Daily total of recorded sales for the last 7 days">
           ${days
             .map(
-              (d, i) => `<div class="bar ${i === days.length - 1 ? "today" : ""}">${d.total ? short(d.total) : "$0"}<span class="fill" style="height:${Math.round((d.total / max) * 85)}%"></span></div>`
+              (d, i) => `<div class="bar ${i === days.length - 1 ? "today" : ""}">${short(d.total)}<span class="fill" style="height:${Math.round((d.total / max) * 85)}%"></span></div>`
             )
             .join("")}
         </div>
-        <div class="bar-labels">${days.map((d) => `<span>${new Date(`${d.date}T12:00:00`).toLocaleDateString("en-US", { weekday: "short" })}</span>`).join("")}</div>
-        <p class="note">Daily sales revenue recorded in Accounting.</p>
+        <div class="bar-labels">${days.map((d) => `<span>${esc(weekdayShort(d.date))}</span>`).join("")}</div>
+        <p class="note">Daily total of recorded sales (CAD).</p>
       </div></section>
       <section class="card"><div class="card-head"><h2>Needs attention</h2></div>
         ${
@@ -128,10 +132,6 @@ async function showSelection(main) {
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const values = formValues(form);
-    if (values.reportType === "financial") {
-      location.hash = "#/accounting"; // the financial summary lives in Accounting (Feature 4)
-      return;
-    }
     const periodStart = values.reportType === "sales" ? values.periodStart : monthStart;
     const periodEnd = values.reportType === "sales" ? values.periodEnd : todayText();
     const result = await busy(form.querySelector("button[type=submit]"), () =>
@@ -178,7 +178,7 @@ function showReport(main) {
 
   const c = countsOf(allRows);
   const summaryLine = isInventory
-    ? `${allRows.length} products · ${c.units.toLocaleString()} units in stock · ${c.low} low stock · ${c.out} out of stock (low-stock products listed first)`
+    ? `${allRows.length} products · ${num(c.units)} units in stock · ${c.low} low stock · ${c.out} out of stock (low-stock products listed first)`
     : (report.summary || []).slice(3).join(" · ");
 
   main.innerHTML = `
@@ -231,7 +231,7 @@ function showReport(main) {
   $("#clear2")?.addEventListener("click", () => clearFilter(main));
   $("#export").addEventListener("click", () => openExport());
   $("#back").addEventListener("click", async () => {
-    await api("POST", "/dashboard/reports/close"); // alternate flow 10b
+    if (report.reportId) await api("POST", `/dashboard/reports/${encodeURIComponent(report.reportId)}/close`); // alternate flow 10b
     current = null;
     location.hash = "#/dashboard";
   });
@@ -275,9 +275,14 @@ async function applyFilter(event, main, productNames) {
 
   const criteria = { startDate: values.startDate || null, endDate: values.endDate || null, productId, category: values.category || null };
   let rows = allRows;
+  if (Object.values(criteria).some(Boolean) && !current.base.reportId) {
+    current.filterError = "There is no report data to filter. Go back to Reports and choose another report or period.";
+    current.chip = null;
+    return showReport(main);
+  }
   if (Object.values(criteria).some(Boolean)) {
     // 8a / 8b: ReportFilter validates the criteria, then the report applies them.
-    const result = await busy(form.querySelector("button[type=submit]"), () => api("POST", "/dashboard/reports/filter", criteria));
+    const result = await busy(form.querySelector("button[type=submit]"), () => api("POST", `/dashboard/reports/${encodeURIComponent(current.base.reportId)}/filter`, criteria));
     if (!result.ok) {
       current.filterError = result.message;
       current.rows = sortRows(current.base.reportType, allRows);
@@ -305,8 +310,12 @@ async function applyFilter(event, main, productNames) {
 async function clearFilter(main) {
   // Regenerate the report so the export no longer uses the filter.
   const { reportType, periodStart, periodEnd } = current.base;
+  const previousId = current.base.reportId;
   const result = await api("POST", "/dashboard/reports", { reportType, periodStart, periodEnd });
-  if (result.ok) current.base = result;
+  if (result.ok) {
+    current.base = result;
+    if (previousId) api("POST", `/dashboard/reports/${encodeURIComponent(previousId)}/close`); // the old copy is no longer used
+  }
   current.filter = {};
   current.filterError = null;
   current.chip = null;
@@ -343,7 +352,7 @@ function openExport() {
   $("#export-form", root).addEventListener("submit", async (event) => {
     event.preventDefault();
     const values = formValues(event.target);
-    const result = await busy(event.target.querySelector("button[type=submit]"), () => api("POST", "/dashboard/reports/export", { format: values.format }));
+    const result = await busy(event.target.querySelector("button[type=submit]"), () => api("POST", `/dashboard/reports/${encodeURIComponent(report.reportId)}/export`, { format: values.format }));
     if (!result.ok) {
       const box = $(".form-message", root);
       box.className = "form-message error";

@@ -94,7 +94,7 @@ router.post(
 
     res.status(201).json({
       ok: true,
-      message: `${transactionType} of $${Number(aTransaction.amount).toFixed(2)} saved (${aTransaction.transactionId}). The profit-and-loss balance was recalculated.`,
+      message: `${transactionType} of $${Number(aTransaction.amount).toFixed(2)} CAD saved (${aTransaction.transactionId}). The profit-and-loss balance was recalculated.`,
       transactionId: aTransaction.transactionId,
       ...(await ledgerView(ledger)),
     });

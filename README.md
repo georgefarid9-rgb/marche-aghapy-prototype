@@ -199,11 +199,50 @@ The browser and expiry checks are in `scripts/verifyInventoryBrowser.js` and `sc
 
 A second browser interface covers all six features. Its screens follow the Milestone 6 Figma wireframes (1.1–1.5, 2.1–2.7, 3.1–3.5), and Features 3, 5 and 6 use the same layout. It runs next to the Feature 1 prototype above, on its own port, so the two do not interfere.
 
-1. Run `npm install` once (it adds Express, a small web server).
-2. Run `npm run demo`, then open **http://localhost:3001**.
-3. Press `Ctrl + C` to stop.
+1. Run `npm ci` once (it installs Express and the other packages from the lockfile).
+2. Run `npm run demo:reset` to build a fresh demo database, then `npm run demo`.
+3. Open **http://localhost:3001**. Press `Ctrl + C` to stop.
 
-- It uses its own database, `database/demo.sqlite`, with sample data matching the wireframes (Feta Cheese 400g, Hellenic Foods Inc., ...). It is created on the first run and never touches the team's main database. `npm run demo:reset` rebuilds it (run this before a presentation).
-- `npm run web:check` tests every screen's actions on a temporary database.
-- The screens call the same classes as the test scripts (`InventoryPage`, `ReportHandler`, `SchedulePage`, `BusinessPartner`, `Ledger`, `Employee`, ...), so the same validation rules apply. Server: `src/web/server.js`; routes: `src/web/api/`; pages: `src/web/public/`.
+The Feature 1 prototype still starts with `npm start` on http://localhost:3000.
+
+### Local demonstration only
+
+- The demo server listens on **127.0.0.1** (this computer only). Nobody else on the network can open it.
+- There is **no login**. The **Signed in as** list in the top bar is a demo role switch (store owner or an employee), not security. Do not deploy the demo publicly.
+- Feature 6 uses that choice on the server: only an employee can look up customers, open complaints, requests and returns, and only the store owner can open the owner inbox and resolve escalated cases (anyone else gets a 403 message). The choice is kept per browser tab.
+
+### Database and export isolation
+
+- The demo always uses its own database, `database/demo.sqlite`. It is created on the first run; `npm run demo:reset` rebuilds it (run it before a presentation).
+- `demo:reset` only ever deletes `database/demo.sqlite`, and the demo seed script refuses to run on `database/marche-aghapy.sqlite`. The demo server also refuses to start on the team's main database.
+- Reports exported from the demo are saved in `exports/demo/`, apart from reports exported with the main database (`exports/`). Both folders and the `.sqlite` files are in `.gitignore`.
+
+### English / français and money
+
+- **EN | FR** in the top bar switches every screen between English and French. The choice is remembered in the browser. Messages written by the server's business rules stay in English.
+- All money is in Canadian dollars: **$2,012.85 CAD** in English and **2 012,85 $ CA** in French. This is only formatting; no amount is converted. Dates keep the wireframes' MM/DD/YYYY layout and use the same UTC date as the server.
+
+### Sample data
+
+`npm run demo:reset` adds sample data matching the wireframes (Feta Cheese 400g, Hellenic Foods Inc., ...):
+
+- For every "Daily sales" register total in Accounting, 15 to 40 realistic sales (with their items) add up to that total to the cent, so the Dashboard tile, the "Sales – last 7 days" chart and the Sales Report agree with Accounting. These sales are inserted directly, so stock levels do not change (the Inventory Report shows 14 products and 237 units).
+- Feature 6 rejection paths: a sale older than the 30-day return window, an item that was already fully returned, and a customer with no phone number (CUST-004).
+- **Refunds:** a refund is recorded in Accounting as an **Expense** with category **Refund**. Revenue stays the gross register total; the refund lowers the profit and the ledger balance.
+
+### Checks
+
+```bash
+npm run web:check            # every screen's actions, on a temporary database (49 checks)
+npx playwright install chromium   # once, for the browser check
+npm run web:browser-check    # clicks through all six features in a headless browser (30 checks)
+```
+
+Both use a temporary database and a temporary export folder that are deleted afterwards, so they never touch the main or the demo database and can be run again and again.
+
+### How it is built
+
+- The screens call the same classes as the test scripts (`InventoryPage`, `ReportHandler`, `SchedulePage`, `BusinessPartner`, `Ledger`, `Employee`, ...), so the same validation rules apply. Server: `src/web/server.js`; routes: `src/web/api/`; pages: `src/web/public/`; French: `src/web/public/i18n.js`.
+- Nothing is kept on the server between requests. Each scheduling request names the employee, shift or schedule it changes, and each report step names its report ID, so two browser tabs never change each other's work.
+- Expiry and restock alerts are re-checked once per UTC day by the same code as the Feature 1 prototype (`src/utils/alertReconciliation.js`), so alerts stay accurate when products expire with no inventory update.
 - `DEMO_SCRIPT.md` lists what to click, in order, during the presentation.

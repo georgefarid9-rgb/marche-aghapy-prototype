@@ -10,6 +10,7 @@ import {
   api, esc, $, $$, banner, pill, field, formValues, showFormErrors, clearFormErrors, pageHeader, busy,
   money, signedMoney, stat, setStatus, fmtDate, fmtDateTime, todayText,
 } from "../ui.js";
+import { currentLang } from "../i18n.js";
 
 const CATEGORIES = {
   Revenue: ["Daily sales", "Catering", "Other income"],
@@ -41,7 +42,7 @@ function monthFigures(data, month = todayText().slice(0, 7)) {
 }
 
 const monthName = (month = todayText().slice(0, 7)) =>
-  new Date(`${month}-15T12:00:00`).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  new Date(`${month}-15T12:00:00`).toLocaleDateString(currentLang() === "fr" ? "fr-CA" : "en-US", { month: "long", year: "numeric" });
 
 function yesterday() {
   const d = new Date(`${todayText()}T12:00:00`);
@@ -106,7 +107,7 @@ function showForm(main, data) {
             </div>
           </div>
           <div class="form-grid">
-            ${field("amount", "Amount", { type: "number", required: true, placeholder: "$ 0.00", attrs: 'min="0.01" step="0.01" inputmode="decimal"' })}
+            ${field("amount", "Amount (CAD)", { type: "number", required: true, placeholder: "0.00", attrs: 'min="0.01" step="0.01" inputmode="decimal"' })}
             ${field("date", "Date", { type: "date", value: todayText(), required: true })}
             <div class="wide" id="category-box"></div>
             <div class="wide">${field("description", "Description (optional)", { type: "textarea", placeholder: "e.g. Friday register total" })}</div>

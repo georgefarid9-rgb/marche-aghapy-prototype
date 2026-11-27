@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en-CA">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -25,9 +25,17 @@
       <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 1 1 12 0v5l1.5 2h-15L6 16z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M10 20a2 2 0 0 0 4 0" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
       <span class="bell-count hidden" id="bell-count"></span>
     </a>
+    <div class="lang-switch" role="group" aria-label="Language">
+      <button type="button" data-lang="en" lang="en">EN</button>
+      <button type="button" data-lang="fr" lang="fr">FR</button>
+    </div>
     <div class="user">
-      <span class="avatar" aria-hidden="true">B</span>
-      <span class="user-text"><strong>Bassem</strong><small>Store Owner</small></span>
+      <span class="avatar" aria-hidden="true" id="user-avatar">B</span>
+      <label class="user-text"><small>Signed in as</small>
+        <select id="signed-in-as" aria-label="Signed in as" data-no-i18n>
+          <option value="OWN-001">Bassem — Store Owner</option>
+        </select>
+      </label>
     </div>
   </header>
 
