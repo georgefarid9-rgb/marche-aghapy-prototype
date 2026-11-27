@@ -26,7 +26,7 @@ const CUSTOMER_ID = "CUST-001";
 const OTHER_CUSTOMER_ID = "CUST-VERIFY-2";
 
 // Everything this script creates (ids are prefixed VERIFY so they are easy to spot).
-const CASE_IDS = ["CASE-VERIFY-1", "CASE-VERIFY-2"];
+const CASE_IDS = ["CASE-VERIFY-1", "CASE-VERIFY-2", "CASE-VERIFY-DUP", "CASE-VERIFY-DUP2", "CASE-VERIFY-DUP3"];
 const RETURN_IDS = [
   "RET-VERIFY-1", "RET-VERIFY-2", "RET-VERIFY-3", "RET-VERIFY-4",
   "RET-VERIFY-5", "RET-VERIFY-6", "RET-VERIFY-7", "RET-VERIFY-8", "RET-VERIFY-9", "RET-VERIFY-RB", "RET-VERIFY-AMT1", "RET-VERIFY-AMT2", "RET-VERIFY-AMT3", "RET-VERIFY-AMT4",
@@ -282,6 +282,31 @@ async function verifyCustomerSupport() {
     const noted = await employee.addNotes(opened.requestId, "Told the customer 9am to 9pm.");
     check(noted.description.includes("Note: Told the customer") && noted.requestStatus === "Logged", "Employee.addNotes() adds the note and logs the request");
     await checkThrows(() => employee.addNotes("REQ-NOPE", "x"), "was not found", "Employee.addNotes() refuses an unknown request");
+
+    // ---- Duplicate guards and the resolveCase() rule (PR #21 review, Feature 6) ----
+    console.log("\nDuplicate guards and StoreOwner.resolveCase() rule");
+    const dupCase = await employee.createComplaintCase(CUSTOMER_ID, { caseId: "CASE-VERIFY-DUP", category: "Pricing", description: "Shelf price differs from the till." });
+    await checkThrows(
+      () => employee.createComplaintCase(CUSTOMER_ID, { caseId: "CASE-VERIFY-DUP2", category: "Pricing", description: "Shelf price differs from the till." }),
+      "identical complaint",
+      "an identical open complaint is refused"
+    );
+    await checkThrows(() => owner.resolveCase(dupCase), "cannot be resolved", "resolveCase() refuses a case that is not escalated");
+    check((await ComplaintCase.findByPk("CASE-VERIFY-DUP")).status === "Open", "the refused case stays Open");
+    await employee.escalateComplaint("CASE-VERIFY-DUP");
+    await owner.resolveCase(dupCase); // the stale object is re-read, so this works
+    check((await ComplaintCase.findByPk("CASE-VERIFY-DUP")).status === "Resolved", "resolveCase() resolves an escalated case");
+    const again = await employee.createComplaintCase(CUSTOMER_ID, { caseId: "CASE-VERIFY-DUP3", category: "Pricing", description: "Shelf price differs from the till." });
+    check(again.caseId === "CASE-VERIFY-DUP3", "the same complaint can be opened again once the first one is resolved");
+    const firstAsk = await employee.openSupportRequest(CUSTOMER_ID, "Next delivery", "When does the feta arrive?");
+    createdRequestIds.push(firstAsk.requestId);
+    await checkThrows(
+      () => employee.openSupportRequest(CUSTOMER_ID, "Next delivery", "When does the feta arrive?"),
+      "identical support request",
+      "an identical open support request is refused"
+    );
+    const flagAgain = await employee.flagMissingRecord("CUST-NOPE", "Asked a second time.");
+    check(flagAgain.requestId === flag.requestId, "flagging the same missing record twice returns the existing flag");
 
     // ---- Return of part of a sale line: quantity, stock and ledger ----
     console.log("\nEmployee.requestReturn(): partial return, items sold and ledger");

@@ -28,8 +28,18 @@ class StoreOwner extends Model {
     return complaint;
   }
 
-  // Close a complaint case as resolved and save it.
+  // Close a complaint case as resolved and save it. Only a case escalated to the owner
+  // ("Pending Owner Review") can be resolved; the case is re-read first so a decision
+  // made in another window is not overwritten.
   async resolveCase(complaint) {
+    if (!complaint.isNewRecord) {
+      await complaint.reload();
+    }
+    if (complaint.status !== "Pending Owner Review") {
+      throw new Error(
+        `Complaint case ${complaint.caseId} is ${complaint.status}, not escalated to the owner, so it cannot be resolved.`
+      );
+    }
     return complaint.setStatus("Resolved");
   }
 

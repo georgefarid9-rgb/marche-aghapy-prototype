@@ -28,7 +28,11 @@
     "inventory:demo": "node scripts/seedFeature1Demo.js",
     "inventory:web-check": "node scripts/verifyInventoryWeb.js",
     "inventory:browser-check": "node scripts/verifyInventoryBrowser.js",
-    "inventory:expiry-check": "node scripts/verifyExpiryReconciliation.js"
+    "inventory:expiry-check": "node scripts/verifyExpiryReconciliation.js",
+    "demo": "node src/web/server.js",
+    "demo:reset": "node scripts/demoReset.js",
+    "web:check": "node scripts/verifyWebApp.js",
+    "web:browser-check": "node scripts/verifyWebBrowser.js"
   },
   "repository": {
     "type": "git",
@@ -49,6 +53,7 @@
   },
   "homepage": "https://github.com/georgefarid9-rgb/marche-aghapy-prototype#readme",
   "dependencies": {
+    "express": "^4.22.3",
     "sequelize": "^6.37.8",
     "sqlite3": "^6.0.1"
   },
